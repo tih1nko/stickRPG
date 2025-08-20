@@ -23,6 +23,10 @@ backend/db/*.sqlite3-wal
 frontend/build/
 frontend/dist/
 
+# Local tooling/binaries
+ngrok.exe
+ngrok.zip
+
 # IDE
 .idea/
 Thumbs.db
