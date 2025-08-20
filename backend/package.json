@@ -1,0 +1,17 @@
+{
+  "name": "tg-afk-backend",
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "node index.js",
+    "migrate": "node migrate.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5"
+  }
+}

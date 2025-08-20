@@ -1,0 +1,451 @@
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const Database = require('better-sqlite3');
+const fs = require('fs');
+require('dotenv').config();
+const crypto = require('crypto');
+// Верификация initData из Telegram WebApp
+// Документация: https://core.telegram.org/bots/webapps#validating-data-received-via-the-web-app
+function verifyTelegramInitData(initData) {
+  if (!process.env.BOT_TOKEN) return { ok: false, error: 'BOT_TOKEN not set' };
+  if (!initData) return { ok: false, error: 'No initData' };
+  // initData строка вида: key1=value1&key2=value2 ...
+  const urlParams = new URLSearchParams(initData);
+  const hash = urlParams.get('hash');
+  urlParams.delete('hash');
+  const dataCheckArr = [];
+  for (const [k, v] of [...urlParams.entries()].sort()) {
+    dataCheckArr.push(`${k}=${v}`);
+  }
+  const dataCheckString = dataCheckArr.join('\n');
+  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(process.env.BOT_TOKEN).digest();
+  const calcHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+  if (calcHash !== hash) return { ok: false, error: 'Invalid hash' };
+  // Получаем user
+  const userJson = urlParams.get('user');
+  let user = null;
+  try { user = JSON.parse(userJson); } catch {}
+  if (!user || !user.id) return { ok: false, error: 'No user' };
+  return { ok: true, user };
+}
+
+// Middleware: проверка подписи
+function authMiddleware(req, res, next) {
+  if (process.env.DEV_MODE === '1') {
+    // Dev bypass: используем заголовок x-dev-user или fallback
+    const devUser = req.headers['x-dev-user'] || 'dev-user';
+    req.tgUser = { id: devUser };
+    return next();
+  }
+  const initData = req.headers['x-telegram-init'];
+  if (!initData) {
+    return res.status(401).json({ error: 'missing init data' });
+  }
+  if (!verifyTelegramInitData(initData)) {
+    return res.status(401).json({ error: 'invalid init data' });
+  }
+  try {
+    const params = new URLSearchParams(initData);
+    const userRaw = params.get('user');
+    if (!userRaw) return res.status(401).json({ error: 'no user in init data' });
+    const userObj = JSON.parse(userRaw);
+    req.tgUser = { id: String(userObj.id) };
+    next();
+  } catch (e) {
+    return res.status(401).json({ error: 'bad user json' });
+  }
+}
+
+// Helper to extract user id from initData (for logging only)
+function extractUserIdFromInit(initData) {
+  try {
+    if (!initData) return null;
+    const params = new URLSearchParams(initData);
+    const userJson = params.get('user');
+    if (!userJson) return null;
+    const user = JSON.parse(userJson);
+    return user.id ? String(user.id) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+const app = express();
+app.use(cors({
+  origin: true,
+  credentials: false,
+  allowedHeaders: ['Content-Type', 'x-telegram-init', 'x-dev-user']
+}));
+app.use(express.json());
+app.use((req, res, next) => {
+  if (req.headers['x-telegram-init']) {
+    req.telegramUserId = extractUserIdFromInit(req.headers['x-telegram-init']);
+  }
+  next();
+});
+
+const dbPath = process.env.DB_FILE || path.join(__dirname, 'db', 'game.sqlite3');
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+const db = new Database(dbPath);
+try { db.pragma('journal_mode = WAL'); } catch {}
+
+// Ленивая миграция: добавляем недостающие столбцы
+try {
+  const pragma = db.prepare("PRAGMA table_info('users')").all();
+  const cols = pragma.map(c => c.name);
+  if (!cols.includes('last_active')) {
+    db.prepare('ALTER TABLE users ADD COLUMN last_active INTEGER').run();
+  }
+  const addCol = (name, type, def = null) => {
+    if (!cols.includes(name)) {
+      db.prepare(`ALTER TABLE users ADD COLUMN ${name} ${type}${def!==null?` DEFAULT '${def}'`:''}`).run();
+    }
+  };
+  addCol('skin_tone','TEXT','light');
+  addCol('hair_style','TEXT','short');
+  addCol('hair_color','TEXT','#35964A');
+  addCol('eye_color','TEXT','#3A7ACF');
+  addCol('top_slot','TEXT','leaf');
+  addCol('bottom_slot','TEXT','leaf');
+  addCol('accessory_slot','TEXT','flower');
+  addCol('stickman_anim','TEXT'); // JSON с анимациями (walk/attack)
+  addCol('coins','INTEGER',0); // внутренняя валюта
+} catch (e) {
+  if (process.env.NODE_ENV !== 'production') console.warn('User table alter failed (maybe not created yet).', e.message);
+}
+
+function validatePayload(body) {
+  if (!body || typeof body !== 'object') return 'Empty body';
+  if (!body.userId) return 'Missing userId';
+  if (body.data == null) return 'Missing data';
+  return null;
+}
+
+function ensureUser(userId) {
+  const row = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+  if (!row) {
+  const now = Date.now();
+  // В исходной версии здесь было 6 плейсхолдеров и 3 переданных параметра => ошибка "bindings count" и создание пользователя падало.
+  // Оставляем только необходимые динамические поля (id, updated_at, last_active); остальные — фиксированные дефолты.
+  db.prepare(`INSERT INTO users(id, level, xp, updated_at, last_active, skin_tone, hair_style, hair_color, eye_color, top_slot, bottom_slot, accessory_slot)
+        VALUES(?,1,0,?,?,'light','short','#35964A','#3A7ACF','leaf','leaf','flower')`).run(userId, now, now);
+  }
+}
+
+function saveState(userId, data) {
+  ensureUser(userId);
+  const { level = 1, xp = 0, coins = 0, equipped, inventory = [], customization = {}, animations = null } = data;
+  const equipped_item_id = equipped?.id || null;
+  const nowTs = Date.now();
+  // Гарантируем наличие столбца stickman_anim (если база старая и ленивая миграция не прошла при старте)
+  try {
+    const info = db.prepare("PRAGMA table_info('users')").all();
+    if (!info.some(c => c.name === 'stickman_anim')) {
+  if (process.env.NODE_ENV !== 'production') console.warn('[MIGRATE] add stickman_anim');
+      db.prepare('ALTER TABLE users ADD COLUMN stickman_anim TEXT').run();
+    }
+  } catch (e) {
+  if (process.env.NODE_ENV !== 'production') console.warn('stickman_anim check/add failed', e.message);
+  }
+  // Логируем размеры анимационных данных (для отладки сохранения)
+  if (animations) {
+    try {
+      const walkFrames = Array.isArray(animations.walk)? animations.walk.length : 0;
+      const attackFrames = Array.isArray(animations.attack)? animations.attack.length : 0;
+      const attachCount = Array.isArray(animations.attachments)? animations.attachments.length : 0;
+      const jsonStr = JSON.stringify(animations);
+  if (process.env.NODE_ENV !== 'production') console.log(`[SAVE] u=${userId} walk=${walkFrames} attack=${attackFrames} att=${attachCount} bytes=${jsonStr.length}`);
+    } catch {}
+  } else {
+  if (process.env.NODE_ENV !== 'production') console.log(`[SAVE] u=${userId} anim=null`);
+  }
+  db.prepare(`UPDATE users SET level=?, xp=?, coins=?, equipped_item_id=?, updated_at=?, last_active=?,
+    skin_tone=?, hair_style=?, hair_color=?, eye_color=?, top_slot=?, bottom_slot=?, accessory_slot=?, stickman_anim=?
+    WHERE id=?`)
+    .run(level, xp, coins, equipped_item_id, nowTs, nowTs,
+      customization.skinTone || 'light',
+      customization.hairStyle || 'short',
+      customization.hairColor || '#35964A',
+      customization.eyeColor || '#3A7ACF',
+      customization.top || 'leaf',
+      customization.bottom || 'leaf',
+      customization.accessory || 'flower',
+      animations ? JSON.stringify(animations) : null,
+      userId);
+  // Верификация записи (diagnostic)
+  try {
+    const row = db.prepare('SELECT length(stickman_anim) as len FROM users WHERE id=?').get(userId);
+  if (process.env.NODE_ENV !== 'production') console.log(`[SAVE-VERIFY] u=${userId} len=${row?row.len:null}`);
+  } catch (e) {
+  if (process.env.NODE_ENV !== 'production') console.warn('[SAVE-VERIFY] readback failed', e.message);
+  }
+  // упрощённо: удаляем и вставляем заново предметы пользователя
+  const del = db.prepare('DELETE FROM items WHERE user_id = ?');
+  del.run(userId);
+  const ins = db.prepare('INSERT INTO items(id, user_id, base_id, name, type, attack_bonus, rarity, created_at) VALUES(?,?,?,?,?,?,?,?)');
+  const now = Date.now();
+  for (const it of inventory) {
+    ins.run(it.id, userId, it.id.split('_')[0], it.name, it.type, it.attackBonus, it.rarity, now);
+  }
+}
+
+function loadState(userId) {
+  ensureUser(userId);
+  const u = db.prepare(`SELECT id, level, xp, coins, equipped_item_id, last_active, updated_at,
+    skin_tone, hair_style, hair_color, eye_color, top_slot, bottom_slot, accessory_slot, stickman_anim
+    FROM users WHERE id = ?`).get(userId);
+  const itemsRaw = db.prepare('SELECT id, base_id, name, type, attack_bonus as attackBonus, rarity FROM items WHERE user_id = ?').all(userId);
+  const priceFor = (it) => {
+    const base = 10 + (it.attackBonus || 0) * 5;
+    const mult = it.rarity === 'rare' ? 4 : it.rarity === 'uncommon' ? 2 : 1;
+    return Math.max(1, Math.round(base * mult));
+  };
+  const items = itemsRaw.map(it => ({ ...it, sellPrice: priceFor(it) }));
+  const equipped = items.find(i => i.id === u.equipped_item_id) || null;
+  const customization = {
+    skinTone: u.skin_tone,
+    hairStyle: u.hair_style,
+    hairColor: u.hair_color,
+    eyeColor: u.eye_color,
+    top: u.top_slot,
+    bottom: u.bottom_slot,
+    accessory: u.accessory_slot,
+  };
+  let animations = null;
+  if (u.stickman_anim) {
+    try { animations = JSON.parse(u.stickman_anim); } catch {}
+  }
+  if (animations) {
+    try {
+      const walkFrames = Array.isArray(animations.walk)? animations.walk.length : 0;
+      const attackFrames = Array.isArray(animations.attack)? animations.attack.length : 0;
+      const attachCount = Array.isArray(animations.attachments)? animations.attachments.length : 0;
+  const jsonStr = JSON.stringify(animations);
+  if (process.env.NODE_ENV !== 'production') console.log(`[LOAD] u=${userId} w=${walkFrames} a=${attackFrames} att=${attachCount} bytes=${jsonStr.length}`);
+    } catch {}
+  } else {
+  if (process.env.NODE_ENV !== 'production') console.log(`[LOAD] u=${userId} anim=null`);
+  }
+  return { level: u.level, xp: u.xp, coins: u.coins || 0, equipped, inventory: items, customization, animations, last_active: u.last_active, updated_at: u.updated_at };
+}
+
+// Пул предметов для серверного оффлайн дропа (синхрон с фронтом)
+const ITEM_POOL = [
+  { id: 'sword', name: 'Меч', type: 'weapon', attackBonus: 1, rarity: 'common' },
+  { id: 'sabre', name: 'Сабля', type: 'weapon', attackBonus: 2, rarity: 'uncommon' },
+  { id: 'axe', name: 'Топор', type: 'weapon', attackBonus: 3, rarity: 'rare' },
+  { id: 'bow', name: 'Лук', type: 'weapon', attackBonus: 2, rarity: 'uncommon' },
+  { id: 'dagger', name: 'Кинжал', type: 'weapon', attackBonus: 1, rarity: 'common' },
+  { id: 'shield', name: 'Щит', type: 'shield', attackBonus: 0, rarity: 'uncommon' },
+];
+
+function rollDrop() {
+  const weighted = ITEM_POOL.map(it => ({
+    item: it,
+    w: it.rarity === 'common' ? 60 : it.rarity === 'uncommon' ? 30 : 10,
+  }));
+  const total = weighted.reduce((s, x) => s + x.w, 0);
+  let r = Math.random() * total;
+  for (const rec of weighted) {
+    if (r < rec.w) return rec.item;
+    r -= rec.w;
+  }
+  return null;
+}
+
+function applyIdleRewards(userId, state) {
+  const now = Date.now();
+  const lastActive = state.last_active || state.updated_at || now;
+  const elapsedMs = now - lastActive;
+  const minThreshold = 60 * 1000; // не выдаём если меньше минуты
+  if (elapsedMs < minThreshold) return null;
+  const capMs = 3 * 60 * 60 * 1000; // кап: 3 часа
+  const effectiveMs = Math.min(elapsedMs, capMs);
+  // модель: один бой каждые 8 секунд
+  const fights = Math.floor(effectiveMs / 8000);
+  if (fights <= 0) return null;
+  let gainedXp = 0;
+  const newItems = [];
+  for (let i = 0; i < fights; i++) {
+    // xp от 5 до 12
+    gainedXp += 5 + Math.floor(Math.random() * 8);
+    if (Math.random() < 0.18) { // 18% шанс дропа в оффлайне
+      const base = rollDrop();
+      if (base) {
+        const countSame = state.inventory.filter(it => it.id.startsWith(base.id)).length + newItems.filter(it => it.id.startsWith(base.id)).length;
+        newItems.push({
+          id: base.id + '_' + (countSame + 1),
+          base_id: base.id,
+          name: base.name,
+          type: base.type,
+          attackBonus: base.attackBonus,
+          rarity: base.rarity
+        });
+      }
+    }
+  }
+  // Применяем к состоянию
+  let level = state.level;
+  let xp = state.xp + gainedXp;
+  const xpForLevel = (lvl) => 50 + (lvl - 1) * 60;
+  let leveled = 0;
+  while (xp >= xpForLevel(level)) {
+    xp -= xpForLevel(level);
+    level += 1;
+    leveled++;
+  }
+  const mergedInventory = [...state.inventory, ...newItems];
+  // Сохраняем
+  saveState(userId, { level, xp, coins: state.coins || 0, equipped: state.equipped, inventory: mergedInventory, customization: state.customization || {}, animations: state.animations || null });
+  return {
+    elapsedMs,
+    fights,
+    gainedXp,
+    leveled,
+    items: newItems.map(i => ({ id: i.id, name: i.name, rarity: i.rarity, attackBonus: i.attackBonus }))
+  };
+}
+
+// --- Продажа предметов ---
+function computeItemPrice(it) {
+  if (!it) return 0;
+  const base = 10 + (it.attack_bonus || it.attackBonus || 0) * 5;
+  const mult = it.rarity === 'rare' ? 4 : it.rarity === 'uncommon' ? 2 : 1;
+  return Math.max(1, Math.round(base * mult));
+}
+
+app.post('/sell', authMiddleware, (req, res) => {
+  const { userId, itemId } = req.body || {};
+  if (!userId || !itemId) return res.status(400).json({ success:false, error:'bad_request' });
+  if (String(req.tgUser.id) !== String(userId)) return res.status(403).json({ success:false, error:'user_mismatch'});
+  try {
+    ensureUser(userId);
+    const user = db.prepare('SELECT equipped_item_id, coins, stickman_anim FROM users WHERE id=?').get(userId);
+    if (!user) return res.status(404).json({ success:false, error:'user_not_found' });
+    if (user.equipped_item_id === itemId) return res.status(409).json({ success:false, error:'equipped_cannot_sell' });
+    // Проверка json анимаций на наличие привязки (attachments)
+    if (user.stickman_anim) {
+      try {
+        const anim = JSON.parse(user.stickman_anim);
+        if (Array.isArray(anim.attachments) && anim.attachments.some(a => a.itemId === itemId)) {
+          return res.status(409).json({ success:false, error:'attached_cannot_sell' });
+        }
+      } catch {}
+    }
+    const it = db.prepare('SELECT id, name, type, attack_bonus, rarity FROM items WHERE user_id=? AND id=?').get(userId, itemId);
+    if (!it) return res.status(404).json({ success:false, error:'item_not_found' });
+    const price = computeItemPrice(it);
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM items WHERE user_id=? AND id=?').run(userId, itemId);
+      db.prepare('UPDATE users SET coins = COALESCE(coins,0) + ?, updated_at=?, last_active=? WHERE id=?')
+        .run(price, Date.now(), Date.now(), userId);
+      const nu = db.prepare('SELECT coins FROM users WHERE id=?').get(userId);
+      return nu.coins;
+    });
+    const newCoins = tx();
+    res.json({ success:true, coins:newCoins, price, removed:itemId });
+  } catch (e) {
+    console.error('Sell failed', e);
+    res.status(500).json({ success:false, error:'sell_failed' });
+  }
+});
+
+app.post('/save', authMiddleware, (req, res) => {
+  const error = validatePayload(req.body);
+  if (error) return res.status(400).json({ success: false, error });
+  const { userId, data } = req.body;
+  if (String(req.tgUser.id) !== String(userId)) return res.status(403).json({ success:false, error:'user_mismatch'});
+  try {
+    saveState(userId, data);
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, error: 'save_failed' });
+  }
+});
+
+// Частичное обновление (merge)
+app.post('/merge-save', authMiddleware, (req, res) => {
+  const error = validatePayload(req.body);
+  if (error) return res.status(400).json({ success: false, error });
+  const { userId, data } = req.body;
+  if (String(req.tgUser.id) !== String(userId)) return res.status(403).json({ success:false, error:'user_mismatch'});
+  try {
+    const current = loadState(userId);
+    const merged = { ...current, ...data };
+    saveState(userId, merged);
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, error: 'merge_failed' });
+  }
+});
+
+app.get('/load/:userId', authMiddleware, (req, res) => {
+  const userId = req.params.userId;
+  if (String(req.tgUser.id) !== String(userId)) return res.status(403).json({ success:false, error:'user_mismatch'});
+  try {
+  const state = loadState(userId);
+  const idle = applyIdleRewards(userId, state);
+  const fresh = idle ? loadState(userId) : state; // перезагрузим если модифицировано
+  res.json({ data: fresh, success: true, idle });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, error: 'load_failed' });
+  }
+});
+
+app.post('/auth', (req, res) => {
+  const { initData } = req.body || {};
+  const v = verifyTelegramInitData(initData);
+  if (!v.ok) return res.status(401).json({ success: false, error: v.error });
+  res.json({ success: true, user: v.user });
+});
+
+app.get('/ping', (_req, res) => res.json({ pong: true, time: Date.now() }));
+
+// DEBUG: получить сырые анимации пользователя
+app.get('/debug/anim/:userId', authMiddleware, (req, res) => {
+  const userId = req.params.userId;
+  if (String(req.tgUser.id) !== String(userId)) return res.status(403).json({ success:false, error:'user_mismatch'});
+  try {
+    const row = db.prepare('SELECT stickman_anim FROM users WHERE id=?').get(userId);
+    if (!row) return res.status(404).json({ success:false, error:'not_found'});
+    let parsed = null;
+    if (row.stickman_anim) {
+      try { parsed = JSON.parse(row.stickman_anim); } catch (e) { parsed = { parseError: String(e) }; }
+    }
+    res.json({ success:true, rawLength: row.stickman_anim? row.stickman_anim.length:0, animations: parsed });
+  } catch (e) {
+    res.status(500).json({ success:false, error:'debug_failed' });
+  }
+});
+
+// DEBUG: схема таблицы users
+app.get('/debug/schema', (_req, res) => {
+  try {
+    const info = db.prepare("PRAGMA table_info('users')").all();
+    res.json({ success:true, columns: info.map(c=>({ name:c.name, type:c.type, dflt:c.dflt_value })) });
+  } catch (e) {
+    res.status(500).json({ success:false, error:'schema_failed' });
+  }
+});
+
+// Корневой маршрут / и статическая раздача фронтенда (если собран билд)
+const frontendBuildDir = path.join(__dirname, '..', 'frontend', 'build');
+if (fs.existsSync(frontendBuildDir)) {
+  app.use(express.static(frontendBuildDir));
+  app.get('/', (_req, res) => {
+    res.sendFile(path.join(frontendBuildDir, 'index.html'));
+  });
+} else {
+  app.get('/', (_req, res) => res.json({ success: true, service: 'tg-afk-backend', build: false }));
+}
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Backend listening on :${PORT}`);
+});
+
+module.exports = { app, verifyTelegramInitData };

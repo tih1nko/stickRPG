@@ -1,0 +1,32 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Logs
+logs/
+*.log
+
+# Env
+.env
+backend/.env
+frontend/.env
+
+# SQLite databases
+backend/db/*.sqlite3
+backend/db/*.sqlite3-shm
+backend/db/*.sqlite3-wal
+
+# Build outputs
+frontend/build/
+frontend/dist/
+
+# IDE
+.idea/
+Thumbs.db
+
+# Editor
+.vscode/
+.DS_Store

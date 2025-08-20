@@ -1,0 +1,18 @@
+{
+  "name": "tg-app-root",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "description": "Telegram AFK pixel game (root config)",
+  "scripts": {
+  "start": "npm run dev",
+    "build": "echo 'Use frontend/backend for build'",
+    "start:backend": "npm --workspace backend start",
+    "start:frontend": "npm --workspace frontend start",
+  "dev": "powershell -Command \"Start-Job { npm run start:backend }; Start-Sleep 1; npm run start:frontend\"",
+  "deploy:pages": "npm --workspace frontend run build && git subtree push --prefix frontend/build origin gh-pages"
+  }
+}
