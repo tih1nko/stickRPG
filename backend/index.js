@@ -627,7 +627,7 @@ async function sendBotMessage(userId, text){
 // flush invite notifications
 async function flushInviteNotifications(userId){
   try {
-    const rows = db.prepare('SELECT id, from_user_id FROM party_invitations WHERE to_user_id=? AND status="pending" AND COALESCE(notif_sent,0)=0 LIMIT 15').all(userId);
+  const rows = db.prepare("SELECT id, from_user_id FROM party_invitations WHERE to_user_id=? AND status='pending' AND COALESCE(notif_sent,0)=0 LIMIT 15").all(userId);
     if (!rows.length) return;
     if (process.env.NODE_ENV !== 'production') console.log('[FLUSH INVITES] user', userId, 'count', rows.length);
     for (const r of rows) {
@@ -679,39 +679,66 @@ app.get('/debug/users', (req,res)=>{
 
 // Invite
 app.post('/party/invite', authMiddleware, (req,res)=>{
+  const startedAt = Date.now();
   let { username } = req.body || {};
-  if(!username) return res.status(400).json({ success:false, error:'missing_username' });
+  if(!username){
+    if (process.env.NODE_ENV !== 'production') console.warn('[INVITE] reject missing_username from', req.tgUser.id);
+    return res.status(400).json({ success:false, error:'missing_username' });
+  }
   if (username.startsWith('@')) username = username.slice(1);
+  username = username.trim();
+  if (!username){
+    if (process.env.NODE_ENV !== 'production') console.warn('[INVITE] reject empty_after_trim from', req.tgUser.id);
+    return res.status(400).json({ success:false, error:'missing_username' });
+  }
+  let partyId = null;
   try {
     const target = db.prepare('SELECT id FROM users WHERE lower(username)=lower(?)').get(username);
-    if(!target) return res.status(404).json({ success:false, error:'user_not_found' });
-    if(String(target.id) === String(req.tgUser.id)) return res.status(400).json({ success:false, error:'self_invite' });
-    const partyId = getOrCreatePartyForLeader(req.tgUser.id);
-    const dupe = db.prepare('SELECT id FROM party_invitations WHERE from_user_id=? AND to_user_id=? AND party_id=? AND status="pending"')
+    if(!target){
+      if (process.env.NODE_ENV !== 'production') console.warn('[INVITE] user_not_found', username, 'from', req.tgUser.id);
+      return res.status(404).json({ success:false, error:'user_not_found' });
+    }
+    if(String(target.id) === String(req.tgUser.id)){
+      if (process.env.NODE_ENV !== 'production') console.warn('[INVITE] self_invite attempt', req.tgUser.id);
+      return res.status(400).json({ success:false, error:'self_invite' });
+    }
+    partyId = getOrCreatePartyForLeader(req.tgUser.id);
+    const dupe = db.prepare("SELECT id FROM party_invitations WHERE from_user_id=? AND to_user_id=? AND party_id=? AND status='pending'")
       .get(req.tgUser.id, target.id, partyId);
-    if(dupe) return res.json({ success:true, invitationId: dupe.id, duplicate:true, partyId });
+    if(dupe){
+      if (process.env.NODE_ENV !== 'production') console.log('[INVITE] duplicate', dupe.id, 'party', partyId, 'from', req.tgUser.id, 'to', target.id);
+      return res.json({ success:true, invitationId: dupe.id, duplicate:true, partyId });
+    }
     const invId = 'inv_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-    db.prepare('INSERT INTO party_invitations(id,from_user_id,to_user_id,party_id,status,created_at) VALUES(?,?,?,?,?,?)')
-      .run(invId, req.tgUser.id, target.id, partyId, 'pending', Date.now());
-    if (process.env.NODE_ENV !== 'production') console.log('[INVITE] from', req.tgUser.id, 'to', target.id, 'party', partyId, 'inv', invId);
-    // Асинхронно отправим уведомление (не блокируем ответ)
+    try {
+      db.prepare('INSERT INTO party_invitations(id,from_user_id,to_user_id,party_id,status,created_at) VALUES(?,?,?,?,?,?)')
+        .run(invId, req.tgUser.id, target.id, partyId, 'pending', Date.now());
+    } catch(dbErr){
+      if (process.env.NODE_ENV !== 'production') console.error('[INVITE ERROR] insert_failed', dbErr.message);
+      return res.status(500).json({ success:false, error:'db_insert_failed' });
+    }
+    if (process.env.NODE_ENV !== 'production') console.log('[INVITE] created inv', invId, 'party', partyId, 'from', req.tgUser.id, 'to', target.id);
     (async()=>{
       try {
         const fromMeta = db.prepare('SELECT username, first_name FROM users WHERE id=?').get(req.tgUser.id) || {};
         const label = fromMeta.username ? '@'+fromMeta.username : (fromMeta.first_name||'Игрок');
         const sent = await sendBotMessage(target.id, `${label} приглашает вас в группу (party). Откройте WebApp, чтобы принять.`);
-        if (sent) { try { db.prepare('UPDATE party_invitations SET notif_sent=1 WHERE id=?').run(invId); } catch {} }
+        if (sent) { try { db.prepare('UPDATE party_invitations SET notif_sent=1 WHERE id=?').run(invId); } catch(errUpd){ if (process.env.NODE_ENV !== 'production') console.warn('[INVITE NOTIF] flag update failed', errUpd.message); } }
         else if (process.env.NODE_ENV !== 'production') console.warn('[INVITE NOTIF] not sent (user maybe not started bot)');
       } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[INVITE NOTIF] failed', e.message); }
     })();
-    res.json({ success:true, invitationId: invId, partyId, notif: true });
-  } catch(e){ res.status(500).json({ success:false, error:'invite_failed' }); }
+    const took = Date.now() - startedAt;
+    res.json({ success:true, invitationId: invId, partyId, notif:true, tookMs:took });
+  } catch(e){
+    if (process.env.NODE_ENV !== 'production') console.error('[INVITE ERROR] unexpected', { from:req.tgUser.id, usernameAttempt:username, partyIdAttempt:partyId, msg:e.message });
+    res.status(500).json({ success:false, error:'invite_failed' });
+  }
 });
 
 // Incoming invitations
 app.get('/party/invitations', authMiddleware, (req,res)=>{
   try {
-    const rows = db.prepare('SELECT id, from_user_id, party_id, created_at FROM party_invitations WHERE to_user_id=? AND status="pending" ORDER BY created_at DESC')
+  const rows = db.prepare("SELECT id, from_user_id, party_id, created_at FROM party_invitations WHERE to_user_id=? AND status='pending' ORDER BY created_at DESC")
       .all(req.tgUser.id);
     const enriched = rows.map(r=>{
       const u = db.prepare('SELECT username, first_name, last_name FROM users WHERE id=?').get(r.from_user_id) || {};
