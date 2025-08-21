@@ -72,11 +72,34 @@ function extractUserIdFromInit(initData) {
 }
 
 const app = express();
+// CORS whitelist: env CORS_ORIGINS="https://tih1nko.github.io,https://tih1nko.github.io/stickRPG,https://localhost:3000"
+// If empty -> allow any (dev). Also allow loca.lt / ngrok domains in dev mode automatically.
+const rawOrigins = (process.env.CORS_ORIGINS || '').split(',').map(o=>o.trim()).filter(Boolean);
 app.use(cors({
-  origin: true,
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // non-browser / same-origin
+    const devRelaxed = process.env.DEV_MODE === '1';
+    const autoTunnel = /\.loca\.lt$|\.ngrok-free\.app$/i.test(origin);
+    if (
+      rawOrigins.length === 0 && devRelaxed ||
+      rawOrigins.includes(origin) ||
+      (devRelaxed && autoTunnel)
+    ) return cb(null, true);
+    return cb(new Error('CORS blocked: ' + origin));
+  },
   credentials: false,
-  allowedHeaders: ['Content-Type', 'x-telegram-init', 'x-dev-user']
+  methods: ['GET','POST','OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-telegram-init', 'x-dev-user', 'bypass-tunnel-reminder']
 }));
+// Explicit OPTIONS fallback for any route (some proxies strip automatic handling)
+app.use((req,res,next)=>{
+  if (req.method === 'OPTIONS') {
+    res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
+    res.header('Access-Control-Allow-Headers','Content-Type, x-telegram-init, x-dev-user, bypass-tunnel-reminder');
+    return res.sendStatus(204);
+  }
+  next();
+});
 app.use(express.json());
 app.use((req, res, next) => {
   if (req.headers['x-telegram-init']) {
