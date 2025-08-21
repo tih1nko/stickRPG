@@ -681,20 +681,26 @@ function App() {
   }, []);
 
   const refreshInvitations = useCallback(async ()=>{
-    if (!initDataRef.current) return;
+    if (!initDataRef.current && !devModeRef.current) return;
     try {
-      const r = await fetch(getApi('/party/invitations'), { headers: { 'x-telegram-init': initDataRef.current } });
+      const headers: Record<string,string> = initDataRef.current
+        ? { 'x-telegram-init': initDataRef.current }
+        : { 'x-dev-user': userId || 'dev-user' };
+      const r = await fetch(getApi('/party/invitations'), { headers });
       const js = await r.json(); if (js.success) setPartyInvites(js.invitations||[]);
     } catch{}
-  }, [getApi]);
+  }, [getApi, userId]);
 
   const refreshParty = useCallback(async ()=>{
-    if (!initDataRef.current) return;
+    if (!initDataRef.current && !devModeRef.current) return;
     try {
-      const r = await fetch(getApi('/party/state'), { headers: { 'x-telegram-init': initDataRef.current } });
+      const headers: Record<string,string> = initDataRef.current
+        ? { 'x-telegram-init': initDataRef.current }
+        : { 'x-dev-user': userId || 'dev-user' };
+      const r = await fetch(getApi('/party/state'), { headers });
       const js = await r.json(); if (js.success) setParty(js.party);
     } catch{}
-  }, [getApi]);
+  }, [getApi, userId]);
 
   // периодический поллинг party и приглашений
   useEffect(()=>{
@@ -710,13 +716,17 @@ function App() {
   }, [refreshParty, refreshInvitations]);
 
   const searchPartyUsers = useCallback(async (q:string)=>{
-    if (!initDataRef.current || !q) { setPartyResults([]); return; }
+    if (!q) { setPartyResults([]); return; }
+    if (!initDataRef.current && !devModeRef.current) { setPartyResults([]); return; }
     if (partyLoadingRef.current) return; partyLoadingRef.current=true;
     try {
-      const r = await fetch(getApi('/party/search?q='+encodeURIComponent(q)), { headers:{ 'x-telegram-init': initDataRef.current } });
-      const js = await r.json(); if (js.success) setPartyResults(js.results||[]);
-    } catch{} finally { partyLoadingRef.current=false; }
-  }, [getApi]);
+      const headers: Record<string,string> = initDataRef.current
+        ? { 'x-telegram-init': initDataRef.current }
+        : { 'x-dev-user': userId || 'dev-user' };
+      const r = await fetch(getApi('/party/search?q='+encodeURIComponent(q)), { headers });
+      const js = await r.json(); if (js.success) setPartyResults(js.results||[]); else setPartyResults([]);
+    } catch{ setPartyResults([]); } finally { partyLoadingRef.current=false; }
+  }, [getApi, userId]);
 
   const inviteUser = useCallback(async (username:string)=>{
     if(!initDataRef.current) return;
