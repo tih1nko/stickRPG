@@ -22,6 +22,7 @@ backend/db/*.sqlite3-wal
 # Build outputs
 frontend/build/
 frontend/dist/
+frontend/public/config.local.json
 
 # Local tooling/binaries
 ngrok.exe

@@ -18,6 +18,9 @@
     "bot:update": "node scripts/update-telegram-webapp.js",
     "deploy:api": "node scripts/deploy-api.js",
     "deploy:pages": "node scripts/deploystamp.js && npm --workspace frontend run build && git subtree push --prefix frontend/build origin gh-pages"
+  ,"env:local": "node scripts/set-api.js http://localhost:3001"
+  ,"env:tunnel": "node scripts/set-api.js $(node -e \"try{let c=require('fs').readFileSync('frontend/public/config.json','utf8');console.log(JSON.parse(c).apiBase||'')}catch(e){process.exit(1)}\")"
+  ,"env:clear": "node -e \"const fs=require('fs');fs.existsSync('frontend/public/config.json')&&console.log('current',fs.readFileSync('frontend/public/config.json','utf8'));fs.writeFileSync('frontend/public/config.json',JSON.stringify({apiBase:''},null,2)+'\\n');console.log('cleared');\""
   }
   ,"devDependencies": {
   }

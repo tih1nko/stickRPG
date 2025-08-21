@@ -175,6 +175,25 @@ fetch('https://your-backend/ping').then(r=>r.json())
 ---
 Обновлено: автоматический деплой активен.
 
+## 18. Разделение окружений (локально / Telegram прод)
+
+Runtime выбор API:
+- При старте страница смотрит: ?api=, window.__API_BASE__, затем `config.local.json` (если host localhost / 127.0.0.1), затем `config.json`.
+- `frontend/public/config.local.json` (игнорируется гитом) хранит локальный адрес `http://localhost:3001`.
+- В проде Actions публикует `config.json` с API (или пустой, если используете параметр ?api= через кнопку бота).
+
+Скрипты:
+- `npm run env:local` — установить apiBase=localhost:3001 (правит `config.json`). Для dev если хотите пересобрать без параметра.
+- `npm run env:tunnel` — подтянуть текущий apiBase из уже существующего `config.json` (полезно если вы его заранее записали через auto:tunnel).
+- `npm run env:clear` — очистить apiBase (заставит брать `config.local.json` локально или ?api= при открытии).
+
+Рекомендация потока:
+1. Локально: запустить backend (`npm run start:backend` или auto:tunnel) → CRA dev (`npm run start:frontend`) → игра использует proxy на 3001.
+2. Тест через Telegram (dev): `npm run auto:tunnel` обновит `config.json` и кнопку бота с параметром ?api=.
+3. Прод деплой: GitHub Actions билдит с `REACT_APP_API_BASE` (секрет). Можно не записывать apiBase в `config.json` (оставить пустым для гибкости параметра ?api=).
+
+При переключении просто удалите/очистите `config.json` или используйте ?api=.
+
 ## 16. Подключение к Telegram боту как WebApp
 1. Соберите и задеплойте фронт: получите публичный URL (например https://username.github.io/repo-name/ или https://your-domain/app/).
 2. Убедитесь что страница отдает корректный HTML (откройте в браузере). Добавьте в <head> (опционально) цветовую схему под Telegram:
