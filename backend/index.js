@@ -255,6 +255,13 @@ try {
   if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA party] failed', e.message);
 }
 
+// Индексы для ускорения поиска пользователей по имени / username (ленивая проверка)
+try {
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)');
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_users_first_name ON users(first_name)');
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_users_last_name ON users(last_name)');
+} catch(e) { if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA index] create failed', e.message); }
+
 function updateUserMeta(user){
   if(!user || !user.id) return;
   try {
@@ -602,9 +609,7 @@ app.get('/party/search', authMiddleware, (req,res)=>{
         (last_name IS NOT NULL AND last_name LIKE ? ESCAPE '\\')
       )
       ORDER BY updated_at DESC LIMIT 30`).all(like, like, like);
-    // Исключаем самого ищущего пользователя из результатов для удобства
-    const filtered = rows.filter(r => String(r.id) !== String(req.tgUser.id));
-    res.json({ success:true, results: filtered });
+    res.json({ success:true, results: rows });
   } catch(e){ res.status(500).json({ success:false, error:'search_failed' }); }
 });
 
