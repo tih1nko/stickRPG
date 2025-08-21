@@ -66,6 +66,7 @@ function authMiddleware(req, res, next) {
   try {
     ensureUser(String(v.user.id));
     updateUserMeta(v.user);
+    setTimeout(()=>{ flushInviteNotifications(String(v.user.id)); }, 10);
   } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[AUTH autoEnsure] failed', e.message); }
   return next();
 }
@@ -260,6 +261,14 @@ try {
 } catch(e) {
   if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA party] failed', e.message);
 }
+// MIGRATE notif_sent
+try {
+  const invCols = db.prepare("PRAGMA table_info('party_invitations')").all().map(c=>c.name);
+  if (!invCols.includes('notif_sent')) {
+    db.prepare('ALTER TABLE party_invitations ADD COLUMN notif_sent INTEGER DEFAULT 0').run();
+    if (process.env.NODE_ENV !== 'production') console.log('[MIGRATE] party_invitations +notif_sent');
+  }
+} catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[MIGRATE notif_sent] failed', e.message); }
 
 // Индексы для ускорения поиска пользователей по имени / username (ленивая проверка)
 try {
@@ -615,6 +624,23 @@ async function sendBotMessage(userId, text){
   } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[TG NOTIF] error', e.message); return false; }
 }
 
+// flush invite notifications
+async function flushInviteNotifications(userId){
+  try {
+    const rows = db.prepare('SELECT id, from_user_id FROM party_invitations WHERE to_user_id=? AND status="pending" AND COALESCE(notif_sent,0)=0 LIMIT 15').all(userId);
+    if (!rows.length) return;
+    if (process.env.NODE_ENV !== 'production') console.log('[FLUSH INVITES] user', userId, 'count', rows.length);
+    for (const r of rows) {
+      try {
+        const fromMeta = db.prepare('SELECT username, first_name FROM users WHERE id=?').get(r.from_user_id) || {};
+        const label = fromMeta.username ? '@'+fromMeta.username : (fromMeta.first_name||'Игрок');
+        const sent = await sendBotMessage(userId, `${label} приглашает вас в группу (party). Откройте WebApp, чтобы принять.`);
+        if (sent) db.prepare('UPDATE party_invitations SET notif_sent=1 WHERE id=?').run(r.id);
+      } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[FLUSH INVITES] one failed', e.message); }
+    }
+  } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[FLUSH INVITES] failed', e.message); }
+}
+
 // Search users by username prefix (case-insensitive)
 app.get('/party/search', authMiddleware, (req,res)=>{
   const q = (req.query.q||'').toString().trim();
@@ -674,7 +700,8 @@ app.post('/party/invite', authMiddleware, (req,res)=>{
         const fromMeta = db.prepare('SELECT username, first_name FROM users WHERE id=?').get(req.tgUser.id) || {};
         const label = fromMeta.username ? '@'+fromMeta.username : (fromMeta.first_name||'Игрок');
         const sent = await sendBotMessage(target.id, `${label} приглашает вас в группу (party). Откройте WebApp, чтобы принять.`);
-        if (!sent && process.env.NODE_ENV !== 'production') console.warn('[INVITE NOTIF] not sent (user maybe not started bot)');
+        if (sent) { try { db.prepare('UPDATE party_invitations SET notif_sent=1 WHERE id=?').run(invId); } catch {} }
+        else if (process.env.NODE_ENV !== 'production') console.warn('[INVITE NOTIF] not sent (user maybe not started bot)');
       } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[INVITE NOTIF] failed', e.message); }
     })();
     res.json({ success:true, invitationId: invId, partyId, notif: true });
