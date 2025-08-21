@@ -757,7 +757,8 @@ app.post('/party/accept', authMiddleware, (req,res)=>{
     const inv = db.prepare('SELECT * FROM party_invitations WHERE id=?').get(invitationId);
     if(!inv || inv.to_user_id !== String(req.tgUser.id) || inv.status !== 'pending') return res.status(404).json({ success:false, error:'invitation_not_found' });
     db.transaction(()=>{
-      db.prepare('UPDATE party_invitations SET status="accepted" WHERE id=?').run(invitationId);
+      // Одинарные кавычки для строкового литерала в SQLite
+      db.prepare("UPDATE party_invitations SET status='accepted' WHERE id=?").run(invitationId);
       db.prepare('INSERT OR IGNORE INTO party_members(party_id,user_id,role,joined_at) VALUES(?,?,?,?)')
         .run(inv.party_id, req.tgUser.id, 'member', Date.now());
       db.prepare('UPDATE users SET party_id=? WHERE id=?').run(inv.party_id, req.tgUser.id);
@@ -773,9 +774,22 @@ app.post('/party/decline', authMiddleware, (req,res)=>{
   try {
     const inv = db.prepare('SELECT * FROM party_invitations WHERE id=?').get(invitationId);
     if(!inv || inv.to_user_id !== String(req.tgUser.id) || inv.status !== 'pending') return res.status(404).json({ success:false, error:'invitation_not_found' });
-    db.prepare('UPDATE party_invitations SET status="declined" WHERE id=?').run(invitationId);
+    db.prepare("UPDATE party_invitations SET status='declined' WHERE id=?").run(invitationId);
     res.json({ success:true });
   } catch(e){ res.status(500).json({ success:false, error:'decline_failed' }); }
+});
+
+// Outgoing (sent) invitations
+app.get('/party/sent', authMiddleware, (req,res)=>{
+  try {
+    const rows = db.prepare("SELECT id, to_user_id, party_id, status, created_at FROM party_invitations WHERE from_user_id=? AND status='pending' ORDER BY created_at DESC")
+      .all(req.tgUser.id);
+    const enriched = rows.map(r=>{
+      const u = db.prepare('SELECT username, first_name, last_name FROM users WHERE id=?').get(r.to_user_id) || {};
+      return { ...r, to: { id:r.to_user_id, username:u.username, first_name:u.first_name, last_name:u.last_name } };
+    });
+    res.json({ success:true, invitations: enriched });
+  } catch(e){ res.status(500).json({ success:false, error:'sent_list_failed' }); }
 });
 
 // Party state

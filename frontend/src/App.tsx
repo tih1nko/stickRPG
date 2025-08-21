@@ -545,6 +545,7 @@ function App() {
   const [partySearch, setPartySearch] = useState('');
   const [partyResults, setPartyResults] = useState<any[]>([]);
   const [partyInvites, setPartyInvites] = useState<any[]>([]);
+  const [partySentInvites, setPartySentInvites] = useState<any[]>([]);
   const partyLoadingRef = useRef(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const initDataRef = useRef<string | null>(null);
@@ -691,6 +692,17 @@ function App() {
     } catch{}
   }, [getApi, userId]);
 
+  const refreshSentInvitations = useCallback(async ()=>{
+    if (!initDataRef.current && !devModeRef.current) return;
+    try {
+      const headers: Record<string,string> = initDataRef.current
+        ? { 'x-telegram-init': initDataRef.current }
+        : { 'x-dev-user': userId || 'dev-user' };
+      const r = await fetch(getApi('/party/sent'), { headers });
+      const js = await r.json(); if (js.success) setPartySentInvites(js.invitations||[]);
+    } catch{}
+  }, [getApi, userId]);
+
   const refreshParty = useCallback(async ()=>{
     if (!initDataRef.current && !devModeRef.current) return;
     try {
@@ -708,12 +720,12 @@ function App() {
     let stop=false;
     const loop=async()=>{
       if(stop) return;
-      await Promise.all([refreshParty(), refreshInvitations()]);
+  await Promise.all([refreshParty(), refreshInvitations(), refreshSentInvitations()]);
       setTimeout(loop, 6000);
     };
     loop();
     return ()=>{ stop=true; };
-  }, [refreshParty, refreshInvitations]);
+  }, [refreshParty, refreshInvitations, refreshSentInvitations]);
 
   const searchPartyUsers = useCallback(async (q:string)=>{
     if (!q) { setPartyResults([]); return; }
@@ -741,13 +753,14 @@ function App() {
       const js = await r.json();
       if(js.success){
         flashMsg('Приглашение отправлено');
-        refreshParty();
-        refreshInvitations();
+  refreshParty();
+  refreshInvitations();
+  refreshSentInvitations();
       } else {
         flashMsg('Не удалось: '+(js.error||'ошибка'));
       }
     } catch(e){ console.warn('[inviteUser] error', e); flashMsg('Сбой приглашения'); }
-  }, [getApi, refreshParty, refreshInvitations, userId]);
+  }, [getApi, refreshParty, refreshInvitations, refreshSentInvitations, userId]);
 
   const acceptInvite = useCallback(async (id:string)=>{
     if(!initDataRef.current && !devModeRef.current) { flashMsg('Нет авторизации'); return; }
@@ -756,9 +769,9 @@ function App() {
         ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current }
         : { 'Content-Type':'application/json','x-dev-user': userId || 'dev-user' };
       const r = await fetch(getApi('/party/accept'), { method:'POST', headers, body: JSON.stringify({ invitationId:id }) });
-      const js = await r.json(); if(js.success){ flashMsg('В пати'); refreshParty(); refreshInvitations(); } else flashMsg('Ошибка принятия');
+  const js = await r.json(); if(js.success){ flashMsg('В пати'); refreshParty(); refreshInvitations(); refreshSentInvitations(); } else flashMsg('Ошибка принятия');
     } catch(e){ console.warn('[acceptInvite] error', e); flashMsg('Сбой принятия'); }
-  }, [getApi, refreshParty, refreshInvitations, userId]);
+  }, [getApi, refreshParty, refreshInvitations, refreshSentInvitations, userId]);
 
   const declineInvite = useCallback(async (id:string)=>{
     if(!initDataRef.current && !devModeRef.current) { flashMsg('Нет авторизации'); return; }
@@ -767,9 +780,9 @@ function App() {
         ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current }
         : { 'Content-Type':'application/json','x-dev-user': userId || 'dev-user' };
       const r = await fetch(getApi('/party/decline'), { method:'POST', headers, body: JSON.stringify({ invitationId:id }) });
-      const js = await r.json(); if(js.success){ refreshInvitations(); flashMsg('Отклонено'); } else flashMsg('Ошибка отклонения');
+  const js = await r.json(); if(js.success){ refreshInvitations(); refreshSentInvitations(); flashMsg('Отклонено'); } else flashMsg('Ошибка отклонения');
     } catch(e){ console.warn('[declineInvite] error', e); flashMsg('Сбой отклонения'); }
-  }, [getApi, refreshInvitations, userId]);
+  }, [getApi, refreshInvitations, refreshSentInvitations, userId]);
 
   const authHeaders = useCallback((): Record<string,string> => {
     const base: Record<string,string> = initDataRef.current
@@ -1299,7 +1312,7 @@ function App() {
                 </div>
               ))}
             </div>
-            <div style={{fontSize:12, fontWeight:600, marginBottom:4}}>Приглашения</div>
+            <div style={{fontSize:12, fontWeight:600, margin:'10px 0 4px'}}>Входящие приглашения</div>
             <div style={{maxHeight:100, overflowY:'auto', border:'1px solid #233038', padding:6, borderRadius:6}}>
               {partyInvites.length===0 && <div style={{opacity:.5, fontSize:12}}>Нет приглашений</div>}
               {partyInvites.map(inv=>(
@@ -1309,6 +1322,16 @@ function App() {
                     <button onClick={()=> acceptInvite(inv.id)} style={{fontSize:11, padding:'3px 8px'}}>OK</button>
                     <button onClick={()=> declineInvite(inv.id)} style={{fontSize:11, padding:'3px 8px'}}>X</button>
                   </div>
+                </div>
+              ))}
+            </div>
+            <div style={{fontSize:12, fontWeight:600, margin:'12px 0 4px'}}>Отправленные приглашения</div>
+            <div style={{maxHeight:80, overflowY:'auto', border:'1px solid #233038', padding:6, borderRadius:6}}>
+              {partySentInvites.length===0 && <div style={{opacity:.5, fontSize:12}}>Нет отправленных</div>}
+              {partySentInvites.map(inv=>(
+                <div key={inv.id} style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'4px 2px', borderBottom:'1px solid #1f2a31'}}>
+                  <span style={{fontSize:12}}>@{inv.to?.username||inv.to?.id}</span>
+                  <span style={{fontSize:10, opacity:.6}}>ожидание</span>
                 </div>
               ))}
             </div>
