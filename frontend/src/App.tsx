@@ -1210,6 +1210,9 @@ function App() {
             // Все согласились: авто старт у всех
             setAdventurePrompt(null);
             if(screen!=='adventure') setScreen('adventure');
+          } else if(!req && screen==='adventure') {
+            // Если запрос исчез (finish) – выходим на main
+            setScreen('main');
           } else {
             setAdventurePrompt(null);
           }
@@ -1357,7 +1360,14 @@ function App() {
             />
           </main>
           <footer className="footer">
-            <button onClick={() => setScreen('main')}>Закончить поход</button>
+            <button onClick={async () => {
+              // Синхронное завершение: дергаем finish API и выходим
+              try {
+                const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
+                fetch(getApi('/party/adventure/finish'), { method:'POST', headers, body: JSON.stringify({}) }).catch(()=>{});
+              } catch {}
+              setScreen('main');
+            }}>Закончить поход</button>
           </footer>
         </>
       )}

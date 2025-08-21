@@ -935,6 +935,17 @@ app.get('/party/adventure/status', authMiddleware, (req,res)=>{
   } catch(e){ res.status(500).json({ success:false, error:'adventure_status_failed' }); }
 });
 
+// Adventure: finish (any member can finish; removes request row so клиенты выйдут из похода)
+app.post('/party/adventure/finish', authMiddleware, (req,res)=>{
+  try {
+    const row = db.prepare('SELECT party_id FROM users WHERE id=?').get(req.tgUser.id);
+    if(!row || !row.party_id) return res.json({ success:true, finished:false });
+    const partyId = row.party_id;
+    try { db.prepare('DELETE FROM party_adventure_requests WHERE party_id=?').run(partyId); } catch {}
+    return res.json({ success:true, finished:true });
+  } catch(e){ res.status(500).json({ success:false, error:'adventure_finish_failed' }); }
+});
+
 // DEBUG: кто я по заголовку x-telegram-init
 app.get('/debug/whoami', (req, res) => {
   const initData = req.headers['x-telegram-init'];
