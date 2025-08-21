@@ -548,7 +548,8 @@ function App() {
   const [partySentInvites, setPartySentInvites] = useState<any[]>([]);
   const [adventurePrompt, setAdventurePrompt] = useState<any|null>(null); // данные о запросе от другого
   const [acceptedAdventure, setAcceptedAdventure] = useState<{partyId:string; requesterId:string; createdAt:number}|null>(null);
-  const [partyAdventure, setPartyAdventure] = useState<{ status:'pending'|'active'|'ready'|'declined'; mob?:{ name:string; hp:number; max:number; color:string; xp:number } }|null>(null);
+  // Состояние группового похода: 'pending' (ожидание всех) или 'active' (моб создан)
+  const [partyAdventure, setPartyAdventure] = useState<{ status:'pending'|'active'; mob?:{ name:string; hp:number; max:number; color:string; xp:number }; acceptedIds?: string[]; requesterId?: string }|null>(null);
   // Toast notifications
   type Toast = { id:string; body:string; type?:'good'|'bad'; ttl?:string; fade?:boolean };
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -1200,22 +1201,23 @@ function App() {
         const js = await r.json();
         if(js.success){
           const req = js.request;
-          if(req && req.requester_id !== userId && req.status==='pending') {
-            // Если уже приняли (сохранили createdAt) или уже на экране похода — не показываем снова
-            if(acceptedAdventure && acceptedAdventure.createdAt === req.created_at && screen==='adventure') {
+          if(req && req.status==='pending') {
+            const acceptedIds = (req.accepted_ids||'').split(',').filter(Boolean);
+            const iAmRequester = req.requester_id === userId;
+            const iAccepted = iAmRequester || acceptedIds.includes(String(userId));
+            if(iAccepted) {
+              if(screen!=='adventure') setScreen('adventure');
               setAdventurePrompt(null);
-            } else if (!acceptedAdventure || acceptedAdventure.createdAt !== req.created_at) {
-              if(screen!== 'adventure') setAdventurePrompt(req); // показываем только если не в походе
+              setPartyAdventure({ status:'pending', acceptedIds, requesterId: req.requester_id });
+            } else {
+              // Не приняли ещё: показать модал (если не на adventure)
+              if(screen!=='adventure') setAdventurePrompt(req); else setAdventurePrompt(null);
             }
-          } else if(req && (req.status==='ready' || req.status==='active')) {
-            // Все согласились: авто старт у всех
+          } else if(req && req.status==='active') {
+            // Старт для всех
             setAdventurePrompt(null);
             if(screen!=='adventure') setScreen('adventure');
-            if(req.status==='active') {
-              setPartyAdventure({ status:'active', mob: req.mob_name ? { name:req.mob_name, hp:req.mob_hp, max:req.mob_max, color:req.mob_color, xp:req.mob_xp }: undefined });
-            } else {
-              setPartyAdventure({ status:'ready' });
-            }
+            setPartyAdventure({ status:'active', mob: req.mob_name ? { name:req.mob_name, hp:req.mob_hp, max:req.mob_max, color:req.mob_color, xp:req.mob_xp }: undefined, requesterId: req.requester_id });
           } else if(!req && screen==='adventure') {
             // Если запрос исчез (finish) – выходим на main
             setScreen('main');
@@ -1241,7 +1243,15 @@ function App() {
     try {
       const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
       const r = await fetch(getApi('/party/adventure/request'), { method:'POST', headers, body: JSON.stringify({}) });
-  const js = await r.json(); if(js.success){ flashMsg('Ожидание подтверждений пати'); /* лидер ждёт */ } else if(js.error==='not_leader'){ flashMsg('Вы не лидер'); } else flashMsg('Ошибка запроса');
+      const js = await r.json();
+      if(js.success){
+        flashMsg('Ожидание подтверждений пати');
+        // Лидер сразу входит в экран ожидания
+        setScreen('adventure');
+  setPartyAdventure({ status:'pending', acceptedIds: [], requesterId: String(userId) });
+      } else if(js.error==='not_leader'){
+        flashMsg('Вы не лидер');
+      } else flashMsg('Ошибка запроса');
     } catch{ flashMsg('Сбой'); }
   }, [party, getApi, userId, flashMsg]);
 
@@ -1249,11 +1259,18 @@ function App() {
     try {
       const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
       const r = await fetch(getApi('/party/adventure/respond'), { method:'POST', headers, body: JSON.stringify({ accept }) });
-    const js = await r.json(); if(js.success){ if(!accept) flashMsg('Отказано'); setAdventurePrompt(null); if(accept){ flashMsg(js.ready? 'Начинаем!':'Принято'); // сохраняем чтобы не спамить модал
-          // сохраняем отпечаток запроса (берём текущее adventurePrompt либо вытащим через последний статус если нужно)
+      const js = await r.json();
+      if(js.success){
+        if(!accept) flashMsg('Отказано');
+        setAdventurePrompt(null);
+        if(accept){
+          flashMsg('Принято');
           if(adventurePrompt){ setAcceptedAdventure({ partyId: adventurePrompt.party_id || (party?.partyId||''), requesterId: adventurePrompt.requester_id, createdAt: adventurePrompt.created_at }); }
-          if(js.ready || adventurePrompt?.requester_id === userId) setScreen('adventure');
-        } }
+          // Всегда показываем экран ожидания сразу после принятия
+          setScreen('adventure');
+          setPartyAdventure(p=> p && p.status==='active' ? p : { status:'pending', acceptedIds: [String(userId)], requesterId: adventurePrompt?.requester_id });
+        }
+      }
     } catch{ flashMsg('Сбой ответа'); }
   }, [getApi, userId, flashMsg, adventurePrompt, party, setScreen]);
 
@@ -1367,6 +1384,30 @@ function App() {
                     } catch{}
                   }}>Атаковать</button>
                 </div>
+              </div>
+            )}
+            {partyAdventure?.status==='pending' && (
+              <div style={{ position:'absolute', top:12, left:'50%', transform:'translateX(-50%)', background:'#17242bcc', padding:'12px 16px', borderRadius:14, display:'flex', flexDirection:'column', alignItems:'center', gap:6, boxShadow:'0 4px 12px -4px #000a', zIndex:40, minWidth:240 }}>
+                <div style={{fontSize:13, fontWeight:600}}>Ожидание участников…</div>
+                {party && (
+                  (()=>{
+                    const total = party.members.filter((m:any)=> m.id !== partyAdventure.requesterId).length; // сколько должны подтвердить
+                    const accepted = (partyAdventure.acceptedIds||[]).length; // уже подтвердили кроме лидера
+                    return <div style={{fontSize:12, opacity:.75}}>Приняли: {accepted}/{total}</div>;
+                  })()
+                )}
+                {party && (
+                  <div style={{display:'flex', flexWrap:'wrap', gap:4, maxWidth:260, justifyContent:'center'}}>
+                    {party.members.filter((m:any)=> m.id !== partyAdventure.requesterId).map((m:any)=>{
+                      const accepted = (partyAdventure.acceptedIds||[]).includes(String(m.id));
+                      return <div key={m.id} style={{padding:'4px 8px', borderRadius:20, fontSize:11, background: accepted? '#2e5532':'#2a363d', color: accepted? '#cfead1':'#9db3bd', display:'flex', alignItems:'center', gap:4}}>
+                        <span style={{width:6, height:6, borderRadius:'50%', background: accepted? '#5cf16d':'#566e78'}} />
+                        {(m.first_name||m.username||String(m.id)).slice(0,10)}
+                      </div>;
+                    })}
+                  </div>
+                )}
+                <div style={{fontSize:10, letterSpacing:.5, opacity:.45}}>Поход начнётся автоматически</div>
               </div>
             )}
             <div className="toasts-container">
