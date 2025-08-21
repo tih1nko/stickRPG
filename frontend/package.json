@@ -22,7 +22,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "postbuild": "copy build\\index.html build\\404.html && copy build\\index.html build\\200.html",
+  "postbuild": "node scripts/postbuild-spa-fallback.cjs",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "gen:sprite": "node scripts/genHuman64.js"
