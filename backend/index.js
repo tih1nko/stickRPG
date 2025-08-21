@@ -93,7 +93,7 @@ app.use(cors({
     if (/^https?:\/\/[^/]+\.github\.io$/i.test(origin)) {
       return cb(null, true);
     }
-    const autoTunnel = /\.loca\.lt$|\.ngrok-free\.app$/i.test(origin);
+  const autoTunnel = /\.loca\.lt$|\.ngrok-free\.app$|\.dev\.tunnels\.api\.visualstudio\.com$/i.test(origin);
     if (rawOrigins.includes(origin) || autoTunnel) {
       return cb(null, true);
     }
