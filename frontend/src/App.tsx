@@ -1250,7 +1250,7 @@ function App() {
             {partySprites}
             <EquippedBadge />
           </main>
-          <div className="control-bar" style={{position:'fixed', left:0, right:0, bottom:30, display:'flex', flexWrap:'wrap', justifyContent:'center', gap:8, padding:'6px 8px', background:'linear-gradient(180deg, rgba(25,37,45,0.85), rgba(15,23,28,0.85))', backdropFilter:'blur(4px)', zIndex:60}}>
+          <footer className="footer">
             <button onClick={() => setScreen('inventory')}>Инвентарь</button>
             {!party && <button onClick={() => setScreen('adventure')}>Поход</button>}
             {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
@@ -1261,10 +1261,13 @@ function App() {
             )}
             <button onClick={() => setScreen('combo')}>Персонаж</button>
             <button onClick={() => setPartyModal(true)}>Пати</button>
-          </div>
-          <footer className="footer" style={{position:'fixed', left:0, right:0, bottom:0, margin:0, padding:'4px 8px 6px', background:'rgba(20,31,38,0.92)', backdropFilter:'blur(4px)', fontSize:11, display:'flex', justifyContent:'center', gap:10, zIndex:70}}>
-            {onlineBadge} {saveIndicator()} {message && <span style={{ color:'#6cf' }}>{message}</span>}
           </footer>
+          <div className="screen">
+            {message && <div style={{ animation: 'fadeIn 0.3s', color: '#6cf', marginTop:4 }}>{message}</div>}
+            <div style={{ marginTop: 4, fontSize: 11, display: 'flex', gap: 8, alignItems: 'center' }}>
+              {onlineBadge} {saveIndicator()}
+            </div>
+          </div>
         </>
       )}
     {screen === 'adventure' && (
