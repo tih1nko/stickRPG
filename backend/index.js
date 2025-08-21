@@ -135,6 +135,15 @@ app.use((req,res,next)=>{
   }
   next();
 });
+// Универсально добавляем ACAO для обычных ответов (если CORS пропустил)
+app.use((req,res,next)=>{
+  const origin = req.headers.origin;
+  if (origin) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary','Origin');
+  }
+  next();
+});
 app.use(express.json());
 app.use((req, res, next) => {
   if (req.headers['x-telegram-init']) {

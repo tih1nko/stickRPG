@@ -1019,6 +1019,10 @@ function App() {
 
   return (
     <div className="container">
+      {/* API indicator */}
+      <div style={{position:'fixed', right:6, bottom:6, fontSize:10, background:'#18232b', color:'#6da8c9', padding:'4px 8px', borderRadius:6, opacity:0.85, zIndex:100}}>
+        {(() => { const w:any=window as any; return 'API: '+ (w.__API_BASE__||'relative'); })()}
+      </div>
       {screen === 'main' && (
         <>
           <header className="header">

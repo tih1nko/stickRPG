@@ -16,7 +16,7 @@
     "set:api": "node scripts/set-api.js",
     "tunnel": "node scripts/start-tunnel.js",
     "deploy:api": "node scripts/deploy-api.js",
-  "deploy:pages": "npm --workspace frontend run build && git subtree push --prefix frontend/build origin gh-pages"
+  "deploy:pages": "node scripts/deploystamp.js && npm --workspace frontend run build && git subtree push --prefix frontend/build origin gh-pages"
   }
   ,"devDependencies": {
     "localtunnel": "^2.0.2"
