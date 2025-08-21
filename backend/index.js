@@ -62,6 +62,11 @@ function authMiddleware(req, res, next) {
   req.tgUser = { id: String(v.user.id) };
   // сохраним объект для последующего возможного апдейта (в /auth делается основной апдейт)
   req.tgUserMeta = v.user;
+  // Авто-гарантируем наличие пользователя и метаданных, чтобы он появлялся в поиске даже если фронт не вызывал /auth
+  try {
+    ensureUser(String(v.user.id));
+    updateUserMeta(v.user);
+  } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[AUTH autoEnsure] failed', e.message); }
   return next();
 }
 
@@ -262,6 +267,12 @@ try {
   db.prepare('CREATE INDEX IF NOT EXISTS idx_users_first_name ON users(first_name)');
   db.prepare('CREATE INDEX IF NOT EXISTS idx_users_last_name ON users(last_name)');
 } catch(e) { if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA index] create failed', e.message); }
+// Выполним .run() (в случае если ранее забыли) — индексы создадутся один раз
+try {
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)').run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_users_first_name ON users(first_name)').run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_users_last_name ON users(last_name)').run();
+} catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA index run] failed', e.message); }
 
 function updateUserMeta(user){
   if(!user || !user.id) return;
@@ -590,16 +601,18 @@ function getOrCreatePartyForLeader(leaderId){
 
 // Отправка уведомления в Telegram (если у бота есть токен и пользователь уже взаимодействовал с ботом)
 async function sendBotMessage(userId, text){
-  if (!process.env.BOT_TOKEN) return;
-  if (process.env.ENABLE_TG_NOTIF === '0') return; // явное выключение
+  if (!process.env.BOT_TOKEN) return false;
+  if (process.env.ENABLE_TG_NOTIF === '0') return false; // явное выключение
   const chatId = userId; // для WebApp user.id == chat.id (если user начинал бота)
   const url = `https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`;
   const body = { chat_id: chatId, text, disable_notification: false };
   try {
     const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const j = await r.json();
-    if(!j.ok && process.env.NODE_ENV !== 'production') console.warn('[TG NOTIF] send failed', j);
-  } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[TG NOTIF] error', e.message); }
+    if(!j.ok){ if (process.env.NODE_ENV !== 'production') console.warn('[TG NOTIF] send failed', j); return false; }
+    if (process.env.NODE_ENV !== 'production') console.log('[TG NOTIF] sent to', userId);
+    return true;
+  } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[TG NOTIF] error', e.message); return false; }
 }
 
 // Search users by username prefix (case-insensitive)
@@ -611,12 +624,12 @@ app.get('/party/search', authMiddleware, (req,res)=>{
     if(q === '*') {
       const rowsAll = db.prepare(`SELECT id, username, first_name, last_name FROM users
         ORDER BY updated_at DESC LIMIT 30`).all();
-      const filteredAll = rowsAll.filter(r => String(r.id) !== String(req.tgUser.id));
-      return res.json({ success:true, results: filteredAll });
+      return res.json({ success:true, results: rowsAll });
     }
     // Экранируем спецсимволы LIKE
     const esc = (s)=> s.replace(/[\\%_]/g, m=> '\\'+m);
-    const base = esc(q);
+    const norm = q.startsWith('@') ? q.slice(1) : q; // разрешим ввод с @
+    const base = esc(norm);
     const like = `%${base}%`;
     const rows = db.prepare(`SELECT id, username, first_name, last_name, updated_at FROM users
       WHERE (
@@ -640,8 +653,9 @@ app.get('/debug/users', (req,res)=>{
 
 // Invite
 app.post('/party/invite', authMiddleware, (req,res)=>{
-  const { username } = req.body || {};
+  let { username } = req.body || {};
   if(!username) return res.status(400).json({ success:false, error:'missing_username' });
+  if (username.startsWith('@')) username = username.slice(1);
   try {
     const target = db.prepare('SELECT id FROM users WHERE lower(username)=lower(?)').get(username);
     if(!target) return res.status(404).json({ success:false, error:'user_not_found' });
@@ -653,15 +667,17 @@ app.post('/party/invite', authMiddleware, (req,res)=>{
     const invId = 'inv_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
     db.prepare('INSERT INTO party_invitations(id,from_user_id,to_user_id,party_id,status,created_at) VALUES(?,?,?,?,?,?)')
       .run(invId, req.tgUser.id, target.id, partyId, 'pending', Date.now());
+    if (process.env.NODE_ENV !== 'production') console.log('[INVITE] from', req.tgUser.id, 'to', target.id, 'party', partyId, 'inv', invId);
     // Асинхронно отправим уведомление (не блокируем ответ)
     (async()=>{
       try {
         const fromMeta = db.prepare('SELECT username, first_name FROM users WHERE id=?').get(req.tgUser.id) || {};
         const label = fromMeta.username ? '@'+fromMeta.username : (fromMeta.first_name||'Игрок');
-        await sendBotMessage(target.id, `${label} приглашает вас в группу (party). Откройте WebApp, чтобы принять.`);
+        const sent = await sendBotMessage(target.id, `${label} приглашает вас в группу (party). Откройте WebApp, чтобы принять.`);
+        if (!sent && process.env.NODE_ENV !== 'production') console.warn('[INVITE NOTIF] not sent (user maybe not started bot)');
       } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[INVITE NOTIF] failed', e.message); }
     })();
-    res.json({ success:true, invitationId: invId, partyId });
+    res.json({ success:true, invitationId: invId, partyId, notif: true });
   } catch(e){ res.status(500).json({ success:false, error:'invite_failed' }); }
 });
 
