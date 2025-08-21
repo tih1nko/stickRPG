@@ -143,60 +143,74 @@ body {
   position: fixed;
   left: 0; right: 0; bottom: 0;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 6px 10px calc(env(safe-area-inset-bottom) + 6px);
-  background: linear-gradient(180deg, rgba(12,16,20,.85) 0%, rgba(10,12,14,.95) 90%);
-  backdrop-filter: blur(10px) saturate(1.2);
-  box-shadow: 0 -2px 10px -2px rgba(0,0,0,.55);
-  z-index: 50;
-}
-/* Control bar with action buttons */
-.control-bar {
-  position: fixed;
-  left:0; right:0; bottom: 34px; /* space for footer status */
-  display:flex;
-  justify-content:center;
-  gap:10px;
-  padding:10px 14px;
-  flex-wrap:wrap;
+  padding: 10px 14px calc(env(safe-area-inset-bottom) + 10px);
   background: linear-gradient(180deg, rgba(18,22,27,.3) 0%, rgba(14,16,19,.9) 60%);
   backdrop-filter: blur(16px) saturate(1.3);
   box-shadow: 0 -2px 12px -2px rgba(0,0,0,.5);
-  z-index:55;
+  z-index: 50;
 }
-.control-bar button {
-  flex:1;
-  margin:0;
-  padding:14px 0 12px;
+.footer button {
+  flex: 1;
+  margin: 0;
+  padding: 14px 0 12px;
   background: linear-gradient(145deg,#2a333c,#20262c);
-  color:#dfe9ef;
-  border:1px solid #35404a;
+  color: #dfe9ef;
+  border: 1px solid #35404a;
   border-radius: var(--radius);
-  font-size:.95rem;
-  font-weight:600;
-  letter-spacing:.5px;
-  cursor:pointer;
-  box-shadow:0 2px 10px -2px #0008, inset 0 0 0 1px #303a42;
+  font-size: .95rem;
+  font-weight: 600;
+  letter-spacing: .5px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px -2px #0008, inset 0 0 0 1px #303a42;
   transition: background var(--trans-fast), transform var(--trans-fast), color var(--trans-fast), box-shadow var(--trans-fast);
+  position: relative;
+  overflow: hidden;
+}
+.footer button:before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg,rgba(255,255,255,.06),rgba(255,255,255,0));
+  opacity: 0; pointer-events: none;
+  transition: opacity .4s;
+}
+.footer button:hover:before { opacity: 1; }
+.footer button:active {
+  transform: translateY(2px) scale(.97);
+  background: var(--grad-accent);
+  color: #101315;
+  box-shadow: 0 1px 4px -1px #0008, 0 0 0 1px #46f2c255;
+}
+
+/* Универсальный стиль кнопок (reuse footer style) */
+.btn, .modal button, .inv-item button {
+  background: linear-gradient(145deg,#2a333c,#20262c);
+  color: #dfe9ef;
+  border: 1px solid #35404a;
+  border-radius: var(--radius-sm);
+  font-weight:600;
+  letter-spacing:.4px;
+  cursor:pointer;
   position:relative;
   overflow:hidden;
-  min-width:120px;
+  box-shadow: 0 2px 10px -2px #0008, inset 0 0 0 1px #303a42;
+  transition: background var(--trans-fast), transform var(--trans-fast), color var(--trans-fast), box-shadow var(--trans-fast);
 }
-.control-bar button:before {
-  content:'';
-  position:absolute; inset:0;
-  background:linear-gradient(90deg,rgba(255,255,255,.06),rgba(255,255,255,0));
-  opacity:0; pointer-events:none;
-  transition:opacity .4s;
-}
-.control-bar button:hover:before { opacity:1; }
-.control-bar button:active {
-  transform:translateY(2px) scale(.97);
-  background: var(--grad-accent);
-  color:#101315;
-  box-shadow:0 1px 4px -1px #0008, 0 0 0 1px #46f2c255;
-}
+.btn:before, .modal button:before, .inv-item button:before { content:''; position:absolute; inset:0; background:linear-gradient(90deg,rgba(255,255,255,.06),rgba(255,255,255,0)); opacity:0; transition:opacity .4s; }
+.btn:hover:before, .modal button:hover:before, .inv-item button:hover:before { opacity:1; }
+.btn:active, .modal button:active, .inv-item button:active { transform:translateY(2px) scale(.97); background: var(--grad-accent); color:#101315; box-shadow:0 1px 4px -1px #0008, 0 0 0 1px #46f2c255; }
+.btn-danger { background:linear-gradient(145deg,#3d1f23,#2a1013); border-color:#5b272d; color:#ffb8b1; }
+.btn-danger:active { background:linear-gradient(145deg,#ff5f56,#ffb347); color:#181b1e; }
+.btn-outline { background:#1e252b; border-color:#32414b; box-shadow:0 2px 8px -2px #0008, inset 0 0 0 1px #2a353d; }
+.btn-outline:hover { background:#273038; }
+.btn-small { padding:6px 10px 7px; font-size:12px; }
+.btn-wide { width:100%; }
+
+/* Перекрываем прежний стиль инвентарных кнопок */
+.inv-item button { padding:6px 10px 7px; font-size:11px; background:linear-gradient(145deg,#2a333c,#20262c); border-radius:var(--radius-sm); }
+.inv-item button:hover { background:#33404a; }
+.inv-item button:active { background:var(--grad-accent); color:#101315; }
 .screen {
   margin-top: 18px;
   min-height: 48px;

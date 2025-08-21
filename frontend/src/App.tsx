@@ -1007,11 +1007,11 @@ function App() {
                         {status}
                       </div>
                     )}
-                    <button
+                    <button className="btn btn-small btn-wide"
                       onClick={() => { if (!(attached||isEquipped)) setSellModalItem(it); }}
                       disabled={attached || isEquipped}
                       title={attached? 'Предмет привязан (в редакторе персонажа)' : (isEquipped ? 'Снят в персонаже чтобы продать' : 'Продать')}
-                      style={(attached||isEquipped) ? { opacity:.45, cursor:'not-allowed', width:'100%' } : { width:'100%' }}
+                      style={(attached||isEquipped) ? { opacity:.45, cursor:'not-allowed' } : undefined}
                     >Продать{!attached && !isEquipped ? ` (+${computeSellPrice(it)})` : ''}</button>
                   </div>
                 );
@@ -1360,8 +1360,8 @@ function App() {
               Продать «<span style={{color:rarityColor[sellModalItem.rarity]}}>{sellModalItem.name}</span>» за <b>{computeSellPrice(sellModalItem)}</b> монет?
             </div>
             <div style={{display:'flex', gap:8, justifyContent:'flex-end'}}>
-              <button disabled={selling} onClick={()=>setSellModalItem(null)}>Отмена</button>
-              <button disabled={selling} onClick={()=> sellItem(sellModalItem.id)} style={{background:'#c44949'}}>
+              <button className="btn btn-outline" disabled={selling} onClick={()=>setSellModalItem(null)}>Отмена</button>
+              <button className="btn btn-danger" disabled={selling} onClick={()=> sellItem(sellModalItem.id)}>
                 {selling ? '...' : 'Продать'}
               </button>
             </div>
