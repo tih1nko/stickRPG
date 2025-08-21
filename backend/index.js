@@ -123,12 +123,9 @@ app.use((req,res,next)=>{
 // Explicit OPTIONS fallback for any route (some proxies strip automatic handling)
 app.use((req,res,next)=>{
   if (req.method === 'OPTIONS') {
-    const devRelaxed = process.env.DEV_MODE === '1';
-    const origin = req.headers.origin;
-    if (devRelaxed) {
-      if (origin) { res.header('Access-Control-Allow-Origin', origin); res.header('Vary','Origin'); }
-      else res.header('Access-Control-Allow-Origin','*');
-    }
+  const origin = req.headers.origin;
+  if (origin) { res.header('Access-Control-Allow-Origin', origin); res.header('Vary','Origin'); }
+  else res.header('Access-Control-Allow-Origin','*');
     res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
     // Используем запрошенные заголовки если браузер прислал их
     const reqHeaders = req.headers['access-control-request-headers'];
