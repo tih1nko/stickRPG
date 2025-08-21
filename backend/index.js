@@ -560,6 +560,8 @@ app.post('/auth', (req, res) => {
   const { initData } = req.body || {};
   const v = verifyTelegramInitData(initData);
   if (!v.ok) return res.status(401).json({ success: false, error: v.error });
+  // Гарантируем запись пользователя перед апдейтом метаданных (иначе он не появится в поиске)
+  try { ensureUser(String(v.user.id)); } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[AUTH ensureUser] failed', e.message); }
   updateUserMeta(v.user);
   res.json({ success: true, user: v.user });
 });
@@ -582,9 +584,27 @@ app.get('/party/search', authMiddleware, (req,res)=>{
   const q = (req.query.q||'').toString().trim();
   if(!q) return res.json({ success:true, results: [] });
   try {
-    const rows = db.prepare('SELECT id, username, first_name, last_name FROM users WHERE username LIKE ? ORDER BY updated_at DESC LIMIT 10')
-      .all(q+'%');
-    res.json({ success:true, results: rows });
+    // Поддержка символа * для списка (покажем свежих пользователей)
+    if(q === '*') {
+      const rowsAll = db.prepare(`SELECT id, username, first_name, last_name FROM users
+        ORDER BY updated_at DESC LIMIT 30`).all();
+      const filteredAll = rowsAll.filter(r => String(r.id) !== String(req.tgUser.id));
+      return res.json({ success:true, results: filteredAll });
+    }
+    // Экранируем спецсимволы LIKE
+    const esc = (s)=> s.replace(/[\\%_]/g, m=> '\\'+m);
+    const base = esc(q);
+    const like = `%${base}%`;
+    const rows = db.prepare(`SELECT id, username, first_name, last_name FROM users
+      WHERE (
+        (username IS NOT NULL AND username LIKE ? ESCAPE '\\') OR
+        (first_name IS NOT NULL AND first_name LIKE ? ESCAPE '\\') OR
+        (last_name IS NOT NULL AND last_name LIKE ? ESCAPE '\\')
+      )
+      ORDER BY updated_at DESC LIMIT 30`).all(like, like, like);
+    // Исключаем самого ищущего пользователя из результатов для удобства
+    const filtered = rows.filter(r => String(r.id) !== String(req.tgUser.id));
+    res.json({ success:true, results: filtered });
   } catch(e){ res.status(500).json({ success:false, error:'search_failed' }); }
 });
 

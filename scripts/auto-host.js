@@ -13,7 +13,8 @@ const botScript = path.join(root,'scripts','update-telegram-webapp.js');
 
 function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-async function waitPing(url='http://localhost:3001/ping', timeoutMs=20000){
+// Ждём локальный backend прежде чем поднимать туннель (локальный порт ещё всё равно нужен)
+async function waitPing(url='http://127.0.0.1:3001/ping', timeoutMs=20000){
   const start=Date.now();
   while(Date.now()-start < timeoutMs){
     try { const res = await fetch(url); if(res.ok) return true; } catch {}
@@ -39,7 +40,18 @@ function findDevTunnelExe(){
 
 async function run(){
   console.log('[auto] Starting backend...');
-  const backend = spawn('node',['index.js'],{cwd:backendDir, stdio:['ignore','pipe','pipe']});
+  const useNodemon = process.env.USE_NODEMON === '1';
+  let backend;
+  if(useNodemon){
+    if(process.platform === 'win32') {
+      backend = spawn('cmd.exe', ['/c', 'npx nodemon index.js'], { cwd: backendDir, stdio:['ignore','pipe','pipe'], env:{...process.env, DEV_MODE: process.env.DEV_MODE || '0'} });
+    } else {
+      backend = spawn('npx', ['nodemon','index.js'], { cwd: backendDir, stdio:['ignore','pipe','pipe'], env:{...process.env, DEV_MODE: process.env.DEV_MODE || '0'} });
+    }
+    console.log('[auto] Nodemon enabled (watch mode)');
+  } else {
+    backend = spawn('node',['index.js'], { cwd: backendDir, stdio:['ignore','pipe','pipe'], env:{...process.env, DEV_MODE: process.env.DEV_MODE || '0'} });
+  }
   backend.stdout.on('data',d=>process.stdout.write('[backend] '+d.toString()));
   backend.stderr.on('data',d=>process.stderr.write('[backend-err] '+d.toString()));
   try { await waitPing(); console.log('[auto] Backend up.'); } catch(e){ console.error('[auto] Backend failed:', e.message); process.exit(1); }
@@ -62,7 +74,8 @@ async function run(){
         fs.writeFileSync(configPath, JSON.stringify({ apiBase: tunnelUrl }, null, 2)+'\n');
         console.log('[auto] Updated config.json apiBase');
       } catch(e){ console.warn('[auto] config.json write failed', e.message); }
-      webAppUrl = `https://tih1nko.github.io/stickRPG/?api=${tunnelUrl}`;
+  webAppUrl = `https://tih1nko.github.io/stickRPG/?api=${tunnelUrl}`;
+  console.log('[auto] WebApp URL for Telegram:', webAppUrl);
       // Run bot:update
       console.log('[auto] Updating Telegram bot menu ->', webAppUrl);
       const upd = spawn(process.execPath,[botScript,'--url',webAppUrl], {cwd:root, stdio:'inherit'});
