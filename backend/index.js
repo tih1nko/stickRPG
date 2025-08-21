@@ -261,6 +261,16 @@ try {
 } catch(e) {
   if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA party] failed', e.message);
 }
+// Adventure request table
+try {
+  db.prepare(`CREATE TABLE IF NOT EXISTS party_adventure_requests (
+    party_id TEXT PRIMARY KEY,
+    requester_id TEXT,
+    created_at INTEGER,
+    status TEXT,
+    decliner_id TEXT
+  )`).run();
+} catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA party_adventure] failed', e.message); }
 // MIGRATE notif_sent
 try {
   const invCols = db.prepare("PRAGMA table_info('party_invitations')").all().map(c=>c.name);
@@ -814,6 +824,92 @@ app.get('/party/state', authMiddleware, (req,res)=>{
     });
     res.json({ success:true, party:{ partyId, members: formatted } });
   } catch(e){ res.status(500).json({ success:false, error:'party_state_failed' }); }
+});
+
+// Leave party
+app.post('/party/leave', authMiddleware, (req,res)=>{
+  try {
+    const row = db.prepare('SELECT party_id FROM users WHERE id=?').get(req.tgUser.id);
+    if(!row || !row.party_id) return res.json({ success:true, left:false });
+    const partyId = row.party_id;
+    const members = db.prepare('SELECT user_id, role FROM party_members WHERE party_id=?').all(partyId);
+    const me = members.find(m=> m.user_id === String(req.tgUser.id));
+    if(!me) return res.json({ success:true, left:false });
+    // remove member
+    const tx = db.transaction(()=>{
+      db.prepare('DELETE FROM party_members WHERE party_id=? AND user_id=?').run(partyId, req.tgUser.id);
+      db.prepare('UPDATE users SET party_id=NULL WHERE id=?').run(req.tgUser.id);
+      if(me.role === 'leader') {
+        const rest = members.filter(m=> m.user_id !== String(req.tgUser.id));
+        if(rest.length === 0) {
+          // disband: clear party_id for safety already done for leaving member; others none
+        } else {
+          // promote first
+          db.prepare("UPDATE party_members SET role='leader' WHERE party_id=? AND user_id=?").run(partyId, rest[0].user_id);
+        }
+      }
+      // Clear any outstanding adventure request if requester left
+      try { db.prepare('DELETE FROM party_adventure_requests WHERE party_id=? AND requester_id=?').run(partyId, req.tgUser.id); } catch {}
+    });
+    tx();
+    res.json({ success:true, left:true });
+  } catch(e){ res.status(500).json({ success:false, error:'leave_failed' }); }
+});
+
+// Adventure: request start (initiator automatically enters adventure; others see prompt)
+app.post('/party/adventure/request', authMiddleware, (req,res)=>{
+  try {
+    const row = db.prepare('SELECT party_id FROM users WHERE id=?').get(req.tgUser.id);
+    if(!row || !row.party_id) return res.status(400).json({ success:false, error:'no_party' });
+    const partyId = row.party_id;
+    // Upsert request (replace existing)
+    db.prepare('INSERT INTO party_adventure_requests(party_id, requester_id, created_at, status, decliner_id) VALUES(?,?,?,?,NULL) ON CONFLICT(party_id) DO UPDATE SET requester_id=excluded.requester_id, created_at=excluded.created_at, status=excluded.status, decliner_id=NULL')
+      .run(partyId, req.tgUser.id, Date.now(), 'pending');
+    res.json({ success:true });
+  } catch(e){ res.status(500).json({ success:false, error:'adventure_request_failed' }); }
+});
+
+// Adventure: respond
+app.post('/party/adventure/respond', authMiddleware, (req,res)=>{
+  const { accept } = req.body || {};
+  try {
+    const row = db.prepare('SELECT party_id FROM users WHERE id=?').get(req.tgUser.id);
+    if(!row || !row.party_id) return res.status(400).json({ success:false, error:'no_party' });
+    const partyId = row.party_id;
+    const reqRow = db.prepare('SELECT * FROM party_adventure_requests WHERE party_id=?').get(partyId);
+    if(!reqRow) return res.status(404).json({ success:false, error:'no_request' });
+    if(reqRow.requester_id === String(req.tgUser.id)) return res.status(400).json({ success:false, error:'requester_cannot_respond' });
+    if(reqRow.status !== 'pending') return res.json({ success:true, status:reqRow.status });
+    if(accept) {
+      // Accept = do nothing (request remains pending for others); client can just start adventure
+      return res.json({ success:true, accepted:true });
+    } else {
+      db.prepare("UPDATE party_adventure_requests SET status='declined', decliner_id=? WHERE party_id=? AND status='pending'")
+        .run(req.tgUser.id, partyId);
+      return res.json({ success:true, declined:true });
+    }
+  } catch(e){ res.status(500).json({ success:false, error:'adventure_respond_failed' }); }
+});
+
+// Adventure: status polling
+app.get('/party/adventure/status', authMiddleware, (req,res)=>{
+  try {
+    const row = db.prepare('SELECT party_id FROM users WHERE id=?').get(req.tgUser.id);
+    if(!row || !row.party_id) return res.json({ success:true, request:null });
+    const partyId = row.party_id;
+    const reqRow = db.prepare('SELECT * FROM party_adventure_requests WHERE party_id=?').get(partyId);
+    if(!reqRow) return res.json({ success:true, request:null });
+    // Expire after 2 minutes
+    if(Date.now() - reqRow.created_at > 120000) {
+      try { db.prepare('DELETE FROM party_adventure_requests WHERE party_id=?').run(partyId); } catch {}
+      return res.json({ success:true, request:null });
+    }
+    // If requester sees a declined -> auto consume (delete) after reporting once
+    if(reqRow.status === 'declined' && reqRow.requester_id === String(req.tgUser.id)) {
+      try { db.prepare('DELETE FROM party_adventure_requests WHERE party_id=?').run(partyId); } catch {}
+    }
+    res.json({ success:true, request: reqRow });
+  } catch(e){ res.status(500).json({ success:false, error:'adventure_status_failed' }); }
 });
 
 // DEBUG: кто я по заголовку x-telegram-init

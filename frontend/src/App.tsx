@@ -546,6 +546,7 @@ function App() {
   const [partyResults, setPartyResults] = useState<any[]>([]);
   const [partyInvites, setPartyInvites] = useState<any[]>([]);
   const [partySentInvites, setPartySentInvites] = useState<any[]>([]);
+  const [adventurePrompt, setAdventurePrompt] = useState<any|null>(null); // данные о запросе от другого
   const partyLoadingRef = useRef(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const initDataRef = useRef<string | null>(null);
@@ -1143,12 +1144,76 @@ function App() {
 
   const partySprites = useMemo(()=>{
     if(!party || !party.members) return null;
-    return party.members.filter((m:any)=> m.id !== userId).slice(0,3).map((m:any, idx:number)=>{
-      // Простая заглушка: кружок с инициалами; позже можно отрисовать по его animations
+    // Располагаем игроков в ряд начиная левее центра
+    const others = party.members.filter((m:any)=> m.id !== userId).slice(0,3);
+    return others.map((m:any, idx:number)=>{
       const initials = (m.first_name||m.username||m.id).slice(0,2).toUpperCase();
-      return <div key={m.id} style={{ position:'absolute', left:`calc(50% + ${(idx+1)*70}px)`, bottom: 12, width:64, height:64, borderRadius:'50%', background:'#24333c', display:'flex', alignItems:'center', justifyContent:'center', color:'#6cf', fontSize:18, fontWeight:600, boxShadow:'0 0 0 2px #1b262d, 0 0 6px #000' }}>{initials}</div>;
+      return <div key={m.id} style={{ position:'absolute', left:`calc(50% + ${(-90 + idx*70)}px)`, bottom: 12, width:52, height:52, borderRadius:'50%', background:'#24333c', display:'flex', alignItems:'center', justifyContent:'center', color:'#6cf', fontSize:14, fontWeight:600, boxShadow:'0 0 0 2px #1b262d, 0 0 6px #000' }}>{initials}</div>;
     });
   }, [party, userId]);
+
+  // Модальное окно подтверждения похода
+  const adventurePromptModal = adventurePrompt ? (
+    <div className="modal-backdrop" style={{zIndex:300}}>
+      <div className="modal" style={{maxWidth:300}}>
+        <h3 style={{marginTop:0}}>Поход</h3>
+        <div style={{fontSize:13, lineHeight:1.4, marginBottom:14}}>Игрок хочет пойти в поход. Присоединиться?</div>
+        <div style={{display:'flex', gap:8, justifyContent:'flex-end'}}>
+          <button onClick={()=> respondAdventure(false)}>Нет</button>
+          <button onClick={()=> { respondAdventure(true); setScreen('adventure'); }} style={{background:'#2e5532'}}>Да</button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  // Поллинг статуса adventure request
+  useEffect(()=>{
+    if(!initDataRef.current && !devModeRef.current) return;
+    let stop=false;
+    const loop=async()=>{
+      if(stop) return;
+      try {
+        const headers: Record<string,string> = initDataRef.current ? { 'x-telegram-init': initDataRef.current } : { 'x-dev-user': userId||'dev-user' };
+        const r = await fetch(getApi('/party/adventure/status'), { headers });
+        const js = await r.json();
+        if(js.success){
+          if(js.request && js.request.requester_id !== userId && js.request.status==='pending') setAdventurePrompt(js.request);
+          else setAdventurePrompt(null);
+          if(js.request && js.request.status==='declined' && js.request.requester_id===userId){
+            flashMsg('Поход отклонён');
+          }
+        }
+      } catch{}
+      setTimeout(loop, 4000);
+    };
+    loop();
+    return ()=>{ stop=true; };
+  }, [getApi, userId]);
+
+  const requestAdventure = useCallback(async ()=>{
+    if(!party) { flashMsg('Нет пати'); return; }
+    try {
+      const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
+      const r = await fetch(getApi('/party/adventure/request'), { method:'POST', headers, body: JSON.stringify({}) });
+      const js = await r.json(); if(js.success){ flashMsg('Ожидание ответа пати'); } else flashMsg('Ошибка запроса');
+    } catch{ flashMsg('Сбой'); }
+  }, [party, getApi, userId]);
+
+  const respondAdventure = useCallback(async (accept:boolean)=>{
+    try {
+      const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
+      const r = await fetch(getApi('/party/adventure/respond'), { method:'POST', headers, body: JSON.stringify({ accept }) });
+      const js = await r.json(); if(js.success){ if(!accept) flashMsg('Отказано'); setAdventurePrompt(null); if(accept) flashMsg('Принято'); }
+    } catch{ flashMsg('Сбой ответа'); }
+  }, [getApi, userId]);
+
+  const leaveParty = useCallback(async ()=>{
+    try {
+      const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
+      const r = await fetch(getApi('/party/leave'), { method:'POST', headers, body: JSON.stringify({}) });
+      const js = await r.json(); if(js.success){ flashMsg('Пати покинута'); refreshParty(); }
+    } catch{ flashMsg('Сбой выхода'); }
+  }, [getApi, refreshParty, userId]);
 
 
   return (
@@ -1186,6 +1251,7 @@ function App() {
           <footer className="footer">
             <button onClick={() => setScreen('inventory')}>Инвентарь</button>
             <button onClick={() => setScreen('adventure')}>Поход</button>
+            {party && <button onClick={requestAdventure}>Начать поход (пати)</button>}
             <button onClick={() => setScreen('combo')}>Персонаж</button>
             <button onClick={() => setPartyModal(true)}>Пати</button>
           </footer>
@@ -1299,6 +1365,7 @@ function App() {
         <div className="modal-backdrop" onMouseDown={(e)=>{ if(e.target===e.currentTarget) setPartyModal(false); }}>
           <div className="modal" style={{ maxWidth:360 }}>
             <h3 style={{marginTop:0}}>Пати</h3>
+            {party && <div style={{marginBottom:8, display:'flex', justifyContent:'flex-end'}}><button onClick={leaveParty} style={{background:'#523', fontSize:12}}>Покинуть пати</button></div>}
             <div style={{display:'flex', gap:6, marginBottom:10}}>
               <input value={partySearch} onChange={e=>{ setPartySearch(e.target.value); searchPartyUsers(e.target.value); }} placeholder="Поиск по username" style={{flex:1}} />
               <button onClick={()=> searchPartyUsers(partySearch)}>Поиск</button>
@@ -1341,6 +1408,7 @@ function App() {
           </div>
         </div>
       )}
+  {adventurePromptModal}
     </div>
   );
 }
