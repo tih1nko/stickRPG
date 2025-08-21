@@ -89,6 +89,10 @@ app.use(cors({
     if (/^https?:\/\/localhost:\d+$/i.test(origin) || /^https?:\/\/127\.0\.0\.1:\d+$/i.test(origin)) {
       return cb(null, true);
     }
+    // Разрешаем GitHub Pages (для статики) — можно дополнительно ограничить через CORS_ORIGINS, но упростим
+    if (/^https?:\/\/[^/]+\.github\.io$/i.test(origin)) {
+      return cb(null, true);
+    }
     const autoTunnel = /\.loca\.lt$|\.ngrok-free\.app$/i.test(origin);
     if (rawOrigins.includes(origin) || autoTunnel) {
       return cb(null, true);
