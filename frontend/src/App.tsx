@@ -1250,19 +1250,21 @@ function App() {
             {partySprites}
             <EquippedBadge />
           </main>
-          <footer className="footer" style={{flexDirection:'row', flexWrap:'wrap', justifyContent:'center', gap:8, paddingBottom:30}}>
-            <button onClick={() => setScreen('inventory')}>Инвентарь</button>
-            {!party && <button onClick={() => setScreen('adventure')}>Поход</button>}
-            {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
-              <button onClick={requestAdventure}>Начать поход (пати)</button>
-            )}
-            {party && !party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
-              <button disabled style={{opacity:.55}}>Ждём лидера</button>
-            )}
-            <button onClick={() => setScreen('combo')}>Персонаж</button>
-            <button onClick={() => setPartyModal(true)}>Пати</button>
-          </footer>
-          <div style={{position:'fixed', left:0, right:0, bottom:0, padding:'4px 8px 6px', background:'rgba(20,31,38,0.85)', backdropFilter:'blur(4px)', fontSize:11, display:'flex', justifyContent:'center', gap:10, zIndex:50}}>
+          <div style={{position:'absolute', left:0, right:0, bottom:60, display:'flex', justifyContent:'center'}}>
+            <div style={{display:'flex', gap:8, flexWrap:'wrap', justifyContent:'center', background:'rgba(22,33,40,0.8)', padding:'8px 12px', borderRadius:14, boxShadow:'0 4px 10px -4px #0008', backdropFilter:'blur(4px)'}}>
+              <button onClick={() => setScreen('inventory')}>Инвентарь</button>
+              {!party && <button onClick={() => setScreen('adventure')}>Поход</button>}
+              {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
+                <button onClick={requestAdventure}>Начать поход (пати)</button>
+              )}
+              {party && !party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
+                <button disabled style={{opacity:.55}}>Ждём лидера</button>
+              )}
+              <button onClick={() => setScreen('combo')}>Персонаж</button>
+              <button onClick={() => setPartyModal(true)}>Пати</button>
+            </div>
+          </div>
+          <div style={{position:'fixed', left:0, right:0, bottom:0, padding:'5px 8px 7px', background:'rgba(20,31,38,0.9)', backdropFilter:'blur(4px)', fontSize:11, display:'flex', justifyContent:'center', gap:10, zIndex:50}}>
             {onlineBadge} {saveIndicator()} {message && <span style={{ color:'#6cf' }}>{message}</span>}
           </div>
         </>
