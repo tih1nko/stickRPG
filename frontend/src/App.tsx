@@ -565,7 +565,11 @@ function App() {
       try {
         let uid: string | null = null;
         let userObj: any | null = null;
-        const ENV_API = (process.env.REACT_APP_API_BASE || '').replace(/\/$/,'');
+  // Динамический API base (query ?api= / config.json / env) для первичной загрузки
+  const win:any = window as any;
+  const dynBase = (win.__API_BASE__ || '').toString().replace(/\/$/,'');
+  const envBase = (process.env.REACT_APP_API_BASE || '').replace(/\/$/,'');
+  const ENV_API = dynBase || envBase || '';
         if (initDataRef.current) {
           const authUrl = ENV_API ? `${ENV_API}/auth` : '/auth';
           const resp = await fetch(authUrl, {
