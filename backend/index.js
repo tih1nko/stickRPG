@@ -84,6 +84,10 @@ app.use(cors({
       return cb(null, true);
     }
     if (!origin) return cb(null, true);
+    // Явно разрешаем localhost / 127.0.0.1 всегда (удобство локальной разработки, даже если DEV_MODE не выставлен)
+    if (/^https?:\/\/localhost:\d+$/i.test(origin) || /^https?:\/\/127\.0\.0\.1:\d+$/i.test(origin)) {
+      return cb(null, true);
+    }
     const autoTunnel = /\.loca\.lt$|\.ngrok-free\.app$/i.test(origin);
     if (rawOrigins.includes(origin) || autoTunnel) {
       return cb(null, true);
@@ -538,7 +542,7 @@ if (fs.existsSync(frontendBuildDir)) {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`Backend listening on :${PORT}`);
+  console.log(`Backend listening on :${PORT} (DEV_MODE=${process.env.DEV_MODE || '0'})`);
 });
 
 module.exports = { app, verifyTelegramInitData };
