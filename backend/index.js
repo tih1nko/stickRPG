@@ -267,8 +267,9 @@ try {
     party_id TEXT PRIMARY KEY,
     requester_id TEXT,
     created_at INTEGER,
-    status TEXT,
-    decliner_id TEXT
+  status TEXT,
+  decliner_id TEXT,
+  accepted_ids TEXT
   )`).run();
 } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA party_adventure] failed', e.message); }
 // MIGRATE notif_sent
@@ -866,8 +867,8 @@ app.post('/party/adventure/request', authMiddleware, (req,res)=>{
   const mem = db.prepare("SELECT role FROM party_members WHERE party_id=? AND user_id=?").get(partyId, req.tgUser.id);
   if(!mem || mem.role !== 'leader') return res.status(403).json({ success:false, error:'not_leader' });
     // Upsert request (replace existing)
-    db.prepare('INSERT INTO party_adventure_requests(party_id, requester_id, created_at, status, decliner_id) VALUES(?,?,?,?,NULL) ON CONFLICT(party_id) DO UPDATE SET requester_id=excluded.requester_id, created_at=excluded.created_at, status=excluded.status, decliner_id=NULL')
-      .run(partyId, req.tgUser.id, Date.now(), 'pending');
+    db.prepare('INSERT INTO party_adventure_requests(party_id, requester_id, created_at, status, decliner_id, accepted_ids) VALUES(?,?,?,?,NULL,?) ON CONFLICT(party_id) DO UPDATE SET requester_id=excluded.requester_id, created_at=excluded.created_at, status=excluded.status, decliner_id=NULL, accepted_ids=excluded.accepted_ids')
+      .run(partyId, req.tgUser.id, Date.now(), 'pending', '');
     res.json({ success:true });
   } catch(e){ res.status(500).json({ success:false, error:'adventure_request_failed' }); }
 });
@@ -884,8 +885,19 @@ app.post('/party/adventure/respond', authMiddleware, (req,res)=>{
     if(reqRow.requester_id === String(req.tgUser.id)) return res.status(400).json({ success:false, error:'requester_cannot_respond' });
     if(reqRow.status !== 'pending') return res.json({ success:true, status:reqRow.status });
     if(accept) {
-      // Accept = do nothing (request remains pending for others); client can just start adventure
-      return res.json({ success:true, accepted:true });
+      // Записываем принятие
+      let accepted = (reqRow.accepted_ids||'').split(',').filter(Boolean);
+      if(!accepted.includes(String(req.tgUser.id))) accepted.push(String(req.tgUser.id));
+      // Список участников (кроме инициатора)
+      const others = db.prepare('SELECT user_id FROM party_members WHERE party_id=? AND user_id<>?').all(partyId, reqRow.requester_id).map(r=>String(r.user_id));
+      const allAccepted = others.every(id=> accepted.includes(id));
+      if(allAccepted){
+        db.prepare("UPDATE party_adventure_requests SET status='ready', accepted_ids=? WHERE party_id=? AND status='pending'").run(accepted.join(','), partyId);
+        return res.json({ success:true, accepted:true, ready:true });
+      } else {
+        db.prepare('UPDATE party_adventure_requests SET accepted_ids=? WHERE party_id=? AND status=\'pending\'').run(accepted.join(','), partyId);
+        return res.json({ success:true, accepted:true, ready:false });
+      }
     } else {
       db.prepare("UPDATE party_adventure_requests SET status='declined', decliner_id=? WHERE party_id=? AND status='pending'")
         .run(req.tgUser.id, partyId);
@@ -911,7 +923,7 @@ app.get('/party/adventure/status', authMiddleware, (req,res)=>{
     if(reqRow.status === 'declined' && reqRow.requester_id === String(req.tgUser.id)) {
       try { db.prepare('DELETE FROM party_adventure_requests WHERE party_id=?').run(partyId); } catch {}
     }
-    res.json({ success:true, request: reqRow });
+  res.json({ success:true, request: reqRow });
   } catch(e){ res.status(500).json({ success:false, error:'adventure_status_failed' }); }
 });
 

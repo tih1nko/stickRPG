@@ -1206,6 +1206,10 @@ function App() {
             } else if (!acceptedAdventure || acceptedAdventure.createdAt !== req.created_at) {
               if(screen!== 'adventure') setAdventurePrompt(req); // показываем только если не в походе
             }
+          } else if(req && req.status==='ready') {
+            // Все согласились: авто старт у всех
+            setAdventurePrompt(null);
+            if(screen!=='adventure') setScreen('adventure');
           } else {
             setAdventurePrompt(null);
           }
@@ -1235,10 +1239,10 @@ function App() {
     try {
       const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
       const r = await fetch(getApi('/party/adventure/respond'), { method:'POST', headers, body: JSON.stringify({ accept }) });
-      const js = await r.json(); if(js.success){ if(!accept) flashMsg('Отказано'); setAdventurePrompt(null); if(accept){ flashMsg('Принято'); // сохраняем чтобы не спамить модал
+    const js = await r.json(); if(js.success){ if(!accept) flashMsg('Отказано'); setAdventurePrompt(null); if(accept){ flashMsg(js.ready? 'Начинаем!':'Принято'); // сохраняем чтобы не спамить модал
           // сохраняем отпечаток запроса (берём текущее adventurePrompt либо вытащим через последний статус если нужно)
           if(adventurePrompt){ setAcceptedAdventure({ partyId: adventurePrompt.party_id || (party?.partyId||''), requesterId: adventurePrompt.requester_id, createdAt: adventurePrompt.created_at }); }
-          setScreen('adventure');
+      if(js.ready || adventurePrompt?.requester_id === userId) setScreen('adventure');
         } }
     } catch{ flashMsg('Сбой ответа'); }
   }, [getApi, userId, flashMsg, adventurePrompt, party, setScreen]);
