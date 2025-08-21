@@ -291,6 +291,7 @@ try {
   addAdvCol('mob_color','TEXT');
   addAdvCol('mob_xp','INTEGER');
   addAdvCol('mob_damage','TEXT'); // JSON { userId: damage }
+  addAdvCol('mob_awarded','INTEGER'); // flag to avoid double-award
 } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[MIGRATE accepted_ids] failed', e.message); }
 // MIGRATE notif_sent
 try {
@@ -978,13 +979,41 @@ app.post('/party/adventure/attack', authMiddleware, (req,res)=>{
     const uid = String(req.tgUser.id);
     damageLog[uid] = (damageLog[uid]||0) + dmg;
     db.prepare('UPDATE party_adventure_requests SET mob_hp=?, mob_damage=? WHERE party_id=?').run(newHp, JSON.stringify(damageLog), partyId);
-    let defeated = false; let xpShares=null;
-    if(newHp === 0){ defeated = true; // compute xp split
+    let defeated = false; let xpShares=null; let coinsPerUser = null;
+    if(newHp === 0){ defeated = true; // compute xp split normalized
       const totalDmg = Object.values(damageLog).reduce((a,b)=> a + (typeof b==='number'? b:0),0) || 1;
       const members = db.prepare('SELECT user_id FROM party_members WHERE party_id=?').all(partyId).map(r=> String(r.user_id));
-      xpShares = members.map(id=>({ userId:id, xp: Math.round(reqRow.mob_xp * ( (damageLog[id]||0)/ totalDmg )) }));
+      // proportional raw values
+      const raw = members.map(id=>({ id, part: (damageLog[id]||0)/totalDmg }));
+      // initial rounding
+      let remainingXp = reqRow.mob_xp;
+      xpShares = raw.map(r=>{ const base = Math.floor(reqRow.mob_xp * r.part); remainingXp -= base; return { userId:r.id, xp: base }; });
+      // distribute leftover (due to floor) by descending fractional part
+      const fractional = raw.map(r=>({ id:r.id, frac: (reqRow.mob_xp * r.part) - Math.floor(reqRow.mob_xp * r.part) }))
+        .sort((a,b)=> b.frac - a.frac);
+      for(let i=0;i<remainingXp;i++){ if(fractional[i]) { const idx = xpShares.findIndex(s=> s.userId===fractional[i].id); if(idx>=0) xpShares[idx].xp +=1; } }
+      // coins: simple rule (e.g. 20% of xp each user got) rounded
+      coinsPerUser = xpShares.map(s=>({ userId:s.userId, coins: Math.max(1, Math.round(s.xp*0.2)) }));
+      // prevent double-award: mark mob_hp already zero and if a flag not set
+      if(!reqRow.mob_awarded){
+        const awardTx = db.transaction(()=>{
+          xpShares.forEach(s=>{
+            const cur = db.prepare('SELECT level, xp FROM users WHERE id=?').get(s.userId);
+            if(!cur) return;
+            let level = cur.level||1; let xp = cur.xp||0; xp += s.xp;
+            // simple level curve (mirror client) 50 + (lvl-1)*60
+            const need = (l)=> 50 + (l-1)*60;
+            while(xp >= need(level)){ xp -= need(level); level++; }
+            db.prepare('UPDATE users SET level=?, xp=?, coins = COALESCE(coins,0)+?, updated_at=?, last_active=? WHERE id=?')
+              .run(level, xp, coinsPerUser.find(c=>c.userId===s.userId)?.coins||0, Date.now(), Date.now(), s.userId);
+          });
+          db.prepare('ALTER TABLE party_adventure_requests ADD COLUMN mob_awarded INTEGER').run(); // in case not exists
+          db.prepare('UPDATE party_adventure_requests SET mob_awarded=1 WHERE party_id=?').run(partyId);
+        });
+        try { awardTx(); } catch(e) { /* ignore award race */ }
+      }
     }
-    res.json({ success:true, mob_hp:newHp, mob_max:reqRow.mob_max, defeated, dmg, mob_xp:reqRow.mob_xp, damage:damageLog, xpShares });
+    res.json({ success:true, mob_hp:newHp, mob_max:reqRow.mob_max, defeated, dmg, mob_xp:reqRow.mob_xp, damage:damageLog, xpShares, coins: coinsPerUser });
   } catch(e){ res.status(500).json({ success:false, error:'attack_failed' }); }
 });
 
