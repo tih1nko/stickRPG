@@ -599,7 +599,8 @@ app.get('/ping', (_req, res) => res.json({ pong: true, time: Date.now() }));
 
 // ================= PARTY API =================
 function getOrCreatePartyForLeader(leaderId){
-  const ex = db.prepare('SELECT party_id FROM party_members WHERE user_id=? AND role="leader"').get(leaderId);
+  // В SQLite двойные кавычки трактуются как идентификатор, поэтому было no such column: leader
+  const ex = db.prepare("SELECT party_id FROM party_members WHERE user_id=? AND role='leader'").get(leaderId);
   if (ex && ex.party_id) return ex.party_id;
   const partyId = 'p_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
   db.prepare('INSERT OR IGNORE INTO party_members(party_id,user_id,role,joined_at) VALUES(?,?,?,?)')
