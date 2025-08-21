@@ -729,28 +729,46 @@ function App() {
   }, [getApi, userId]);
 
   const inviteUser = useCallback(async (username:string)=>{
-    if(!initDataRef.current) return;
+    if(!initDataRef.current && !devModeRef.current) { flashMsg('Нет авторизации'); return; }
     try {
-      const r = await fetch(getApi('/party/invite'), { method:'POST', headers:{ 'Content-Type':'application/json','x-telegram-init': initDataRef.current }, body: JSON.stringify({ username }) });
-      const js = await r.json(); if(js.success){ flashMsg('Приглашение отправлено'); refreshParty(); }
-    } catch{}
-  }, [getApi, refreshParty]);
+      let u = username.trim();
+      if (u.startsWith('@')) u = u.slice(1);
+      if (!u) { flashMsg('Пустой username'); return; }
+      const headers: Record<string,string> = initDataRef.current
+        ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current }
+        : { 'Content-Type':'application/json','x-dev-user': userId || 'dev-user' };
+      const r = await fetch(getApi('/party/invite'), { method:'POST', headers, body: JSON.stringify({ username: u }) });
+      const js = await r.json();
+      if(js.success){
+        flashMsg('Приглашение отправлено');
+        refreshParty();
+      } else {
+        flashMsg('Не удалось: '+(js.error||'ошибка'));
+      }
+    } catch(e){ flashMsg('Сбой приглашения'); }
+  }, [getApi, refreshParty, userId]);
 
   const acceptInvite = useCallback(async (id:string)=>{
-    if(!initDataRef.current) return;
+    if(!initDataRef.current && !devModeRef.current) { flashMsg('Нет авторизации'); return; }
     try {
-      const r = await fetch(getApi('/party/accept'), { method:'POST', headers:{ 'Content-Type':'application/json','x-telegram-init': initDataRef.current }, body: JSON.stringify({ invitationId:id }) });
-      const js = await r.json(); if(js.success){ flashMsg('В пати'); refreshParty(); refreshInvitations(); }
-    } catch{}
-  }, [getApi, refreshParty, refreshInvitations]);
+      const headers: Record<string,string> = initDataRef.current
+        ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current }
+        : { 'Content-Type':'application/json','x-dev-user': userId || 'dev-user' };
+      const r = await fetch(getApi('/party/accept'), { method:'POST', headers, body: JSON.stringify({ invitationId:id }) });
+      const js = await r.json(); if(js.success){ flashMsg('В пати'); refreshParty(); refreshInvitations(); } else flashMsg('Ошибка принятия');
+    } catch{ flashMsg('Сбой принятия'); }
+  }, [getApi, refreshParty, refreshInvitations, userId]);
 
   const declineInvite = useCallback(async (id:string)=>{
-    if(!initDataRef.current) return;
+    if(!initDataRef.current && !devModeRef.current) { flashMsg('Нет авторизации'); return; }
     try {
-      const r = await fetch(getApi('/party/decline'), { method:'POST', headers:{ 'Content-Type':'application/json','x-telegram-init': initDataRef.current }, body: JSON.stringify({ invitationId:id }) });
-      const js = await r.json(); if(js.success){ refreshInvitations(); }
-    } catch{}
-  }, [getApi, refreshInvitations]);
+      const headers: Record<string,string> = initDataRef.current
+        ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current }
+        : { 'Content-Type':'application/json','x-dev-user': userId || 'dev-user' };
+      const r = await fetch(getApi('/party/decline'), { method:'POST', headers, body: JSON.stringify({ invitationId:id }) });
+      const js = await r.json(); if(js.success){ refreshInvitations(); } else flashMsg('Ошибка отклонения');
+    } catch{ flashMsg('Сбой отклонения'); }
+  }, [getApi, refreshInvitations, userId]);
 
   const authHeaders = useCallback((): Record<string,string> => {
     const base: Record<string,string> = initDataRef.current
