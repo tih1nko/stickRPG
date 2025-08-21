@@ -547,6 +547,17 @@ function App() {
   const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
   const backoffRef = useRef<number>(0);
 
+  // Универсальный резолвер API (query ?api= / runtime config / env / dev localhost)
+  const getApi = useCallback((path: string): string => {
+    const w: any = window as any;
+    const dyn = (w.__API_BASE__ || '').trim();
+    if (dyn) return dyn.replace(/\/$/, '') + path;
+    const envBase = (process.env.REACT_APP_API_BASE || '').replace(/\/$/, '');
+    if (envBase) return envBase + path;
+    if (devModeRef.current) return `http://localhost:3001${path}`;
+    return path; // относительный (same-origin)
+  }, []);
+
   // Захват initData из объекта Telegram WebApp
   useEffect(() => {
     // @ts-ignore
@@ -559,32 +570,30 @@ function App() {
     }
   }, []);
 
-  // Аутентификация + загрузка
+  // Стабильная ссылка на функцию получения API (чтобы не ругался линтер хуков)
+  const getApiRef = useRef<(path: string) => string>(() => '/api');
+  getApiRef.current = getApi; // обновляем на каждое рендер, ref стабилен
+
+  // Аутентификация + загрузка (используем getApi чтобы избежать относительных путей на GH Pages)
   useEffect(() => {
     (async () => {
       try {
         let uid: string | null = null;
         let userObj: any | null = null;
-  // Динамический API base (query ?api= / config.json / env) для первичной загрузки
-  const win:any = window as any;
-  const dynBase = (win.__API_BASE__ || '').toString().replace(/\/$/,'');
-  const envBase = (process.env.REACT_APP_API_BASE || '').replace(/\/$/,'');
-  const ENV_API = dynBase || envBase || '';
         if (initDataRef.current) {
-          const authUrl = ENV_API ? `${ENV_API}/auth` : '/auth';
-          const resp = await fetch(authUrl, {
+          const resp = await fetch(getApiRef.current('/auth'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ initData: initDataRef.current })
           });
           const authJson = await resp.json();
-            if (authJson.success && authJson.user?.id) {
-              uid = String(authJson.user.id);
-              userObj = authJson.user;
-            } else {
-              if (process.env.NODE_ENV !== 'production') console.warn('Auth fallback dev', authJson);
-              devModeRef.current = true;
-            }
+          if (authJson.success && authJson.user?.id) {
+            uid = String(authJson.user.id);
+            userObj = authJson.user;
+          } else {
+            if (process.env.NODE_ENV !== 'production') console.warn('Auth fallback dev', authJson);
+            devModeRef.current = true;
+          }
         }
         if (!uid) {
           uid = 'dev-user';
@@ -592,8 +601,7 @@ function App() {
         }
         setUserId(uid);
         setTgUser(userObj);
-  const loadUrl = ENV_API ? `${ENV_API}/load/${uid}` : `/load/${uid}`;
-  const loadResp = await fetch(loadUrl, {
+  const loadResp = await fetch(getApiRef.current(`/load/${uid}`), {
           headers: initDataRef.current ? { 'x-telegram-init': initDataRef.current } : { 'x-dev-user': uid }
         });
         const json = await loadResp.json();
@@ -604,11 +612,9 @@ function App() {
           if (d.equipped) setEquipped(d.equipped);
           if (typeof d.level === 'number') setLevel(d.level);
           if (typeof d.xp === 'number') setXp(d.xp);
-          // Подгружаем сохранённые анимации / оверлей / привязки предметов
           if (d.animations && typeof d.animations === 'object') {
             try {
               const anim = d.animations;
-              // менее строгая проверка: достаточно наличия walk
               if (anim.walk) {
                 setStickmanAnim({
                   walk: anim.walk,
@@ -640,20 +646,16 @@ function App() {
             };
             setCustom(norm);
           }
-          // Idle rewards feedback
           if (json.idle) {
             const idle = json.idle;
-            // AFK idle summary: xp +idle.gainedXp
-            if (idle.items?.length) {
-              // idle.items.forEach(it => ... )
-            }
+            if (idle.items?.length) {}
             flashMsg(`AFK +${idle.gainedXp}xp`);
           } else {
             flashMsg('Данные загружены');
           }
         }
       } catch (e) {
-  if (process.env.NODE_ENV !== 'production') console.warn('Load/auth failed', e);
+        if (process.env.NODE_ENV !== 'production') console.warn('Load/auth failed', e);
       }
     })();
   }, []);
@@ -673,16 +675,7 @@ function App() {
     return base;
   }, [userId]);
 
-  const getApi = useCallback((path:string) => {
-    // Порядок приоритета: window.__API_BASE__ -> env -> dev localhost -> relative
-    const w:any = window as any;
-    const dyn = (w.__API_BASE__ || '').trim();
-    if (dyn) return dyn.replace(/\/$/,'') + path;
-    const envBase = (process.env.REACT_APP_API_BASE || '').replace(/\/$/,'');
-    if (envBase) return envBase + path;
-    if (devModeRef.current) return `http://localhost:3001${path}`;
-    return path;
-  }, []);
+  // getApi определён выше, здесь удалён дубликат
 
   const saveAll = useCallback(async () => {
     if (loadingRef.current || !userId) return;
