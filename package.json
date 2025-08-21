@@ -8,17 +8,17 @@
   ],
   "description": "Telegram AFK pixel game (root config)",
   "scripts": {
-  "start": "npm run dev",
+    "start": "npm run dev",
     "build": "echo 'Use frontend/backend for build'",
     "start:backend": "npm --workspace backend start",
     "start:frontend": "npm --workspace frontend start",
-  "dev": "node scripts/dev.js",
+    "dev": "node scripts/dev.js",
     "set:api": "node scripts/set-api.js",
-    "tunnel": "node scripts/start-tunnel.js",
+    "auto:tunnel": "node scripts/auto-host.js",
+    "bot:update": "node scripts/update-telegram-webapp.js",
     "deploy:api": "node scripts/deploy-api.js",
-  "deploy:pages": "node scripts/deploystamp.js && npm --workspace frontend run build && git subtree push --prefix frontend/build origin gh-pages"
+    "deploy:pages": "node scripts/deploystamp.js && npm --workspace frontend run build && git subtree push --prefix frontend/build origin gh-pages"
   }
   ,"devDependencies": {
-    "localtunnel": "^2.0.2"
   }
 }

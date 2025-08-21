@@ -41,21 +41,16 @@ function authMiddleware(req, res, next) {
   }
   const initData = req.headers['x-telegram-init'];
   if (!initData) {
+    if (process.env.NODE_ENV !== 'production') console.warn('[AUTH] missing x-telegram-init');
     return res.status(401).json({ error: 'missing init data' });
   }
-  if (!verifyTelegramInitData(initData)) {
-    return res.status(401).json({ error: 'invalid init data' });
+  const v = verifyTelegramInitData(initData);
+  if (!v.ok) {
+    if (process.env.NODE_ENV !== 'production') console.warn('[AUTH] invalid init data', v.error);
+    return res.status(401).json({ error: v.error || 'invalid init data' });
   }
-  try {
-    const params = new URLSearchParams(initData);
-    const userRaw = params.get('user');
-    if (!userRaw) return res.status(401).json({ error: 'no user in init data' });
-    const userObj = JSON.parse(userRaw);
-    req.tgUser = { id: String(userObj.id) };
-    next();
-  } catch (e) {
-    return res.status(401).json({ error: 'bad user json' });
-  }
+  req.tgUser = { id: String(v.user.id) };
+  return next();
 }
 
 // Helper to extract user id from initData (for logging only)
@@ -74,7 +69,7 @@ function extractUserIdFromInit(initData) {
 
 const app = express();
 // CORS whitelist: env CORS_ORIGINS="https://tih1nko.github.io,https://tih1nko.github.io/stickRPG,https://localhost:3000"
-// If empty -> allow any (dev). Also allow loca.lt / ngrok domains in dev mode automatically.
+// Если пусто -> allow any (dev). Поддерживаем ngrok и VS Code Dev Tunnels домены (localtunnel убран).
 const rawOrigins = (process.env.CORS_ORIGINS || '').split(',').map(o=>o.trim()).filter(Boolean);
 app.use(cors({
   origin: (origin, cb) => {
@@ -93,7 +88,8 @@ app.use(cors({
     if (/^https?:\/\/[^/]+\.github\.io$/i.test(origin)) {
       return cb(null, true);
     }
-  const autoTunnel = /\.loca\.lt$|\.ngrok-free\.app$|\.dev\.tunnels\.api\.visualstudio\.com$/i.test(origin);
+  // Поддержка доменов: ngrok, старый VS Code (dev.tunnels.api.visualstudio.com) и новый формат devtunnels.ms
+  const autoTunnel = /\.ngrok-free\.app$|\.dev\.tunnels\.api\.visualstudio\.com$|\.devtunnels\.ms$/i.test(origin);
     if (rawOrigins.includes(origin) || autoTunnel) {
       return cb(null, true);
     }
@@ -512,6 +508,15 @@ app.post('/auth', (req, res) => {
 });
 
 app.get('/ping', (_req, res) => res.json({ pong: true, time: Date.now() }));
+
+// DEBUG: кто я по заголовку x-telegram-init
+app.get('/debug/whoami', (req, res) => {
+  const initData = req.headers['x-telegram-init'];
+  if (!initData) return res.status(400).json({ ok:false, error:'missing x-telegram-init' });
+  const v = verifyTelegramInitData(initData);
+  if (!v.ok) return res.status(401).json({ ok:false, error:v.error });
+  res.json({ ok:true, user:v.user });
+});
 
 // DEBUG: получить сырые анимации пользователя
 app.get('/debug/anim/:userId', authMiddleware, (req, res) => {

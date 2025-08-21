@@ -542,6 +542,7 @@ function App() {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const initDataRef = useRef<string | null>(null);
   const devModeRef = useRef<boolean>(false);
+  const noTelegramRef = useRef<boolean>(false); // когда запущено вне Telegram при выключенном DEV_MODE
   const dirtyRef = useRef(false);
   const loadingRef = useRef(false);
   const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -565,8 +566,13 @@ function App() {
     if (tg && tg.initData) {
       initDataRef.current = tg.initData;
     } else {
-      // DEV fallback
-      devModeRef.current = true;
+      // Определим, хотим ли мы разрешить локальный dev fallback: если есть ?dev=1 или hostname содержит localhost
+      const urlHasDev = /[?&]dev=1/.test(window.location.search) || /localhost/.test(window.location.hostname);
+      if (urlHasDev) {
+        devModeRef.current = true; // позволим локальные тесты
+      } else {
+        noTelegramRef.current = true; // заблокируем сетевые вызовы — нужно открыть через Telegram
+      }
     }
   }, []);
 
@@ -577,6 +583,10 @@ function App() {
   // Аутентификация + загрузка (используем getApi чтобы избежать относительных путей на GH Pages)
   useEffect(() => {
     (async () => {
+      if (noTelegramRef.current) {
+        setMessage('Открой через Telegram бота, чтобы играть');
+        return; // не пытаемся auth/load
+      }
       try {
         let uid: string | null = null;
         let userObj: any | null = null;
@@ -678,7 +688,8 @@ function App() {
   // getApi определён выше, здесь удалён дубликат
 
   const saveAll = useCallback(async () => {
-    if (loadingRef.current || !userId) return;
+  if (loadingRef.current || !userId) return;
+  if (noTelegramRef.current) return; // блокируем сохранение вне Telegram в проде
     if (!navigator.onLine) return; // не пытаться пока оффлайн
     loadingRef.current = true;
     setSaveStatus(s => ({ ...s, status: 'saving', error: undefined }));
