@@ -272,6 +272,14 @@ try {
   accepted_ids TEXT
   )`).run();
 } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA party_adventure] failed', e.message); }
+// MIGRATE add accepted_ids if missing (for existing installations prior to column addition)
+try {
+  const advCols = db.prepare("PRAGMA table_info('party_adventure_requests')").all().map(c=>c.name);
+  if (!advCols.includes('accepted_ids')) {
+    db.prepare('ALTER TABLE party_adventure_requests ADD COLUMN accepted_ids TEXT').run();
+    if (process.env.NODE_ENV !== 'production') console.log('[MIGRATE] party_adventure_requests +accepted_ids');
+  }
+} catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[MIGRATE accepted_ids] failed', e.message); }
 // MIGRATE notif_sent
 try {
   const invCols = db.prepare("PRAGMA table_info('party_invitations')").all().map(c=>c.name);
