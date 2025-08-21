@@ -298,8 +298,20 @@ function saveState(userId, data) {
   del.run(userId);
   const ins = db.prepare('INSERT INTO items(id, user_id, base_id, name, type, attack_bonus, rarity, created_at) VALUES(?,?,?,?,?,?,?,?)');
   const now = Date.now();
+  // Защита от дубликатов id в массиве inventory (иначе UNIQUE constraint на items.id)
+  const seenIds = new Set();
   for (const it of inventory) {
-    ins.run(it.id, userId, it.id.split('_')[0], it.name, it.type, it.attackBonus, it.rarity, now);
+    if (!it || !it.id) continue;
+    if (seenIds.has(it.id)) {
+      if (process.env.NODE_ENV !== 'production') console.warn('[SAVE] duplicate item id skipped', userId, it.id);
+      continue; // пропускаем повтор
+    }
+    seenIds.add(it.id);
+    try {
+      ins.run(it.id, userId, it.id.split('_')[0], it.name, it.type, it.attackBonus, it.rarity, now);
+    } catch (e) {
+      if (process.env.NODE_ENV !== 'production') console.warn('[SAVE] insert item failed', it.id, e.message);
+    }
   }
 }
 
