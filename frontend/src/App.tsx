@@ -1250,23 +1250,21 @@ function App() {
             {partySprites}
             <EquippedBadge />
           </main>
-          <div style={{position:'absolute', left:0, right:0, bottom:60, display:'flex', justifyContent:'center'}}>
-            <div style={{display:'flex', gap:8, flexWrap:'wrap', justifyContent:'center', background:'rgba(22,33,40,0.8)', padding:'8px 12px', borderRadius:14, boxShadow:'0 4px 10px -4px #0008', backdropFilter:'blur(4px)'}}>
-              <button onClick={() => setScreen('inventory')}>Инвентарь</button>
-              {!party && <button onClick={() => setScreen('adventure')}>Поход</button>}
-              {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
-                <button onClick={requestAdventure}>Начать поход (пати)</button>
-              )}
-              {party && !party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
-                <button disabled style={{opacity:.55}}>Ждём лидера</button>
-              )}
-              <button onClick={() => setScreen('combo')}>Персонаж</button>
-              <button onClick={() => setPartyModal(true)}>Пати</button>
-            </div>
+          <div className="control-bar" style={{position:'fixed', left:0, right:0, bottom:30, display:'flex', flexWrap:'wrap', justifyContent:'center', gap:8, padding:'6px 8px', background:'linear-gradient(180deg, rgba(25,37,45,0.85), rgba(15,23,28,0.85))', backdropFilter:'blur(4px)', zIndex:60}}>
+            <button onClick={() => setScreen('inventory')}>Инвентарь</button>
+            {!party && <button onClick={() => setScreen('adventure')}>Поход</button>}
+            {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
+              <button onClick={requestAdventure}>Начать поход (пати)</button>
+            )}
+            {party && !party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
+              <button disabled style={{opacity:.55}}>Ждём лидера</button>
+            )}
+            <button onClick={() => setScreen('combo')}>Персонаж</button>
+            <button onClick={() => setPartyModal(true)}>Пати</button>
           </div>
-          <div style={{position:'fixed', left:0, right:0, bottom:0, padding:'5px 8px 7px', background:'rgba(20,31,38,0.9)', backdropFilter:'blur(4px)', fontSize:11, display:'flex', justifyContent:'center', gap:10, zIndex:50}}>
+          <footer className="footer" style={{position:'fixed', left:0, right:0, bottom:0, margin:0, padding:'4px 8px 6px', background:'rgba(20,31,38,0.92)', backdropFilter:'blur(4px)', fontSize:11, display:'flex', justifyContent:'center', gap:10, zIndex:70}}>
             {onlineBadge} {saveIndicator()} {message && <span style={{ color:'#6cf' }}>{message}</span>}
-          </div>
+          </footer>
         </>
       )}
     {screen === 'adventure' && (
