@@ -1,0 +1,1 @@
+-- Deprecated: notif_sent уже в 001_init.sql. Оставлено пустым для совместимости.

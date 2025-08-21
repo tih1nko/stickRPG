@@ -6,7 +6,8 @@
   "license": "MIT",
   "scripts": {
     "start": "node index.js",
-    "migrate": "node migrate.js",
+  "migrate": "node migrate.js",
+  "migrate:run": "node migrations.js",
     "dev": "nodemon index.js"
   },
   "devDependencies": {
