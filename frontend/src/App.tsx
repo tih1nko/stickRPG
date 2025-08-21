@@ -1250,24 +1250,23 @@ function App() {
             {partySprites}
             <EquippedBadge />
           </main>
-          <footer className="footer">
-            <button onClick={() => setScreen('inventory')}>Инвентарь</button>
-            {!party && <button onClick={() => setScreen('adventure')}>Поход</button>}
-            {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
-              <button onClick={requestAdventure}>Начать поход (пати)</button>
-            )}
-            {party && !party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
-              <button disabled style={{opacity:.55}}>Ждём лидера</button>
-            )}
-            <button onClick={() => setScreen('combo')}>Персонаж</button>
-            <button onClick={() => setPartyModal(true)}>Пати</button>
-          </footer>
-          <div className="screen">
-            {message && <div style={{ animation: 'fadeIn 0.3s', color: '#6cf', marginTop:4 }}>{message}</div>}
-            <div style={{ marginTop: 4, fontSize: 11, display: 'flex', gap: 8, alignItems: 'center' }}>
-              {onlineBadge} {saveIndicator()}
+          <footer className="footer" style={{flexDirection:'column', alignItems:'stretch'}}>
+            <div style={{display:'flex', gap:8, flexWrap:'wrap', justifyContent:'center'}}>
+              <button onClick={() => setScreen('inventory')}>Инвентарь</button>
+              {!party && <button onClick={() => setScreen('adventure')}>Поход</button>}
+              {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
+                <button onClick={requestAdventure}>Начать поход (пати)</button>
+              )}
+              {party && !party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
+                <button disabled style={{opacity:.55}}>Ждём лидера</button>
+              )}
+              <button onClick={() => setScreen('combo')}>Персонаж</button>
+              <button onClick={() => setPartyModal(true)}>Пати</button>
             </div>
-          </div>
+            <div style={{ marginTop: 6, fontSize: 11, display: 'flex', gap: 10, justifyContent:'center', alignItems:'center' }}>
+              {onlineBadge} {saveIndicator()} {message && <span style={{ color:'#6cf' }}>{message}</span>}
+            </div>
+          </footer>
         </>
       )}
     {screen === 'adventure' && (
