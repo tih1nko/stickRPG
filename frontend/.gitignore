@@ -9,8 +9,7 @@
 /coverage
 
 # production
-# Keep build tracked so root subtree deploy can push it. If using other deploy method later, restore /build ignore.
-#!build
+/build
 
 # misc
 .DS_Store

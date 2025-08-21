@@ -134,6 +134,47 @@ fetch('https://your-backend/ping').then(r=>r.json())
 ---
 Готово.
 
+## 17. GitHub Actions автоматический деплой на gh-pages
+
+Теперь используется workflow `.github/workflows/deploy-pages.yml`:
+
+Что делает:
+1. Триггеры: push в `main` (или `master`) изменяющий `frontend/**`, вручную через `workflow_dispatch`.
+2. Устанавливает Node 18, выполняет `npm ci` в `frontend`.
+3. Собирает `npm run build` с переменной окружения `REACT_APP_API_BASE` из `secrets.WEBAPP_API_BASE`.
+4. Публикует содержимое `frontend/build` в ветку `gh-pages` (форсируя orphan — чистая история статического сайта).
+
+Как настроить секрет:
+1. В репо GitHub → Settings → Secrets and variables → Actions → New repository secret.
+2. Имя: `WEBAPP_API_BASE`, значение: ваш прод backend URL (например `https://your-backend.example.com`).
+3. Сохранить.
+
+Как обновить API без пересборки (вариант):
+- Можно хранить `public/config.json` и заменить его через отдельный deploy (или сделать маленький workflow только для него).
+
+Локальная разработка vs прод:
+- Локально CRA может использовать proxy (package.json `proxy`) на `http://localhost:3001`.
+- В проде React бандл инжектирует переменную на этапе сборки, поэтому при смене backend без пересборки используйте runtime `config.json` (уже есть в build) или `<script>window.__API_BASE__=...</script>`.
+
+Почему снова игнорируем `frontend/build`:
+- Артефакт сборки не хранится в `main`, что уменьшает размер истории и шум в PR.
+- Источник истины — код, а не собранный bundle.
+
+Ручной форс деплой (если нужно быстро):
+1. Измените любой файл во `frontend/` (например `public/deploy-stamp.txt`).
+2. `git commit -m "chore: trigger deploy" && git push` — Actions запустит сборку.
+
+Проблемы:
+- Если workflow не стартует: убедитесь что файл `.github/workflows/deploy-pages.yml` в ветке `main` и Actions не отключены.
+- 404 на GitHub Pages: проверьте что в Settings → Pages выставлена ветка `gh-pages` и путь `/ (root)`.
+- Белый экран / неправильный роутинг: SPA fallback обеспечивают `200.html` + `404.html` (см. postbuild скрипт). peaceiris/actions-gh-pages их публикует.
+
+Очистка / миграция:
+- Старый способ с `git subtree push` больше не нужен. Можно удалить временно закоммиченный build из истории через rebase/фильтр при желании (опционально).
+
+---
+Обновлено: автоматический деплой активен.
+
 ## 16. Подключение к Telegram боту как WebApp
 1. Соберите и задеплойте фронт: получите публичный URL (например https://username.github.io/repo-name/ или https://your-domain/app/).
 2. Убедитесь что страница отдает корректный HTML (откройте в браузере). Добавьте в <head> (опционально) цветовую схему под Telegram:
