@@ -138,6 +138,47 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
 try { db.pragma('journal_mode = WAL'); } catch {}
 
+// Инициализация схемы (создание таблиц, если их нет)
+function initSchema() {
+  try {
+    // Таблица users
+    db.prepare(`CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      level INTEGER DEFAULT 1,
+      xp INTEGER DEFAULT 0,
+      coins INTEGER DEFAULT 0,
+      equipped_item_id TEXT,
+      updated_at INTEGER,
+      last_active INTEGER,
+      skin_tone TEXT DEFAULT 'light',
+      hair_style TEXT DEFAULT 'short',
+      hair_color TEXT DEFAULT '#35964A',
+      eye_color TEXT DEFAULT '#3A7ACF',
+      top_slot TEXT DEFAULT 'leaf',
+      bottom_slot TEXT DEFAULT 'leaf',
+      accessory_slot TEXT DEFAULT 'flower',
+      stickman_anim TEXT
+    )`).run();
+    // Таблица items
+    db.prepare(`CREATE TABLE IF NOT EXISTS items (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      base_id TEXT,
+      name TEXT,
+      type TEXT,
+      attack_bonus INTEGER,
+      rarity TEXT,
+      created_at INTEGER
+    )`).run();
+    // Индекс по user_id для быстрого выборочного удаления/загрузки
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_items_user ON items(user_id)').run();
+  } catch (e) {
+    if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA INIT] failed', e.message);
+  }
+}
+
+initSchema();
+
 // Ленивая миграция: добавляем недостающие столбцы
 try {
   const pragma = db.prepare("PRAGMA table_info('users')").all();
