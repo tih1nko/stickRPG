@@ -94,8 +94,15 @@ app.use(cors({
 // Explicit OPTIONS fallback for any route (some proxies strip automatic handling)
 app.use((req,res,next)=>{
   if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
+    if (origin) {
+      // Разрешаем тот же origin что прошёл CORS (упрощённо, так как dev whitelist пуст и DEV_MODE=1)
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Vary','Origin');
+    }
     res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
     res.header('Access-Control-Allow-Headers','Content-Type, x-telegram-init, x-dev-user, bypass-tunnel-reminder');
+    res.header('Access-Control-Max-Age','600');
     return res.sendStatus(204);
   }
   next();
