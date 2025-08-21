@@ -1231,9 +1231,9 @@ function App() {
     try {
       const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
       const r = await fetch(getApi('/party/adventure/request'), { method:'POST', headers, body: JSON.stringify({}) });
-      const js = await r.json(); if(js.success){ flashMsg('Ожидание ответа пати'); setScreen('adventure'); } else if(js.error==='not_leader'){ flashMsg('Вы не лидер'); } else flashMsg('Ошибка запроса');
+  const js = await r.json(); if(js.success){ flashMsg('Ожидание подтверждений пати'); /* лидер ждёт */ } else if(js.error==='not_leader'){ flashMsg('Вы не лидер'); } else flashMsg('Ошибка запроса');
     } catch{ flashMsg('Сбой'); }
-  }, [party, getApi, userId, flashMsg, setScreen]);
+  }, [party, getApi, userId, flashMsg]);
 
   const respondAdventure = useCallback(async (accept:boolean)=>{
     try {
