@@ -1264,9 +1264,6 @@ function App() {
           </footer>
           <div className="screen">
             {message && <div style={{ animation: 'fadeIn 0.3s', color: '#6cf', marginTop:4 }}>{message}</div>}
-            <div style={{ marginTop: 4, fontSize: 11, display: 'flex', gap: 8, alignItems: 'center' }}>
-              {onlineBadge} {saveIndicator()}
-            </div>
           </div>
         </>
       )}
@@ -1416,6 +1413,14 @@ function App() {
         </div>
       )}
   {adventurePromptModal}
+      {/* Status dock */}
+      <div className="status-dock">
+        <div className="status-pill">
+          <div className={`dot ${isOnline? 'dot-online':'dot-offline'}`}></div>
+          <span className="label">{isOnline? 'Online':'Offline'}</span>
+          <span>{saveStatus.status==='saving' ? 'Сохранение...' : saveStatus.status==='error' ? 'Ошибка' : saveStatus.status==='ok' ? 'OK' : ''}</span>
+        </div>
+      </div>
     </div>
   );
 }
