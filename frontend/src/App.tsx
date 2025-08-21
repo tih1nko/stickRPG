@@ -547,6 +547,7 @@ function App() {
   const [partyInvites, setPartyInvites] = useState<any[]>([]);
   const [partySentInvites, setPartySentInvites] = useState<any[]>([]);
   const [adventurePrompt, setAdventurePrompt] = useState<any|null>(null); // данные о запросе от другого
+  const [acceptedAdventure, setAcceptedAdventure] = useState<{partyId:string; requesterId:string; createdAt:number}|null>(null);
   // Toast notifications
   type Toast = { id:string; body:string; type?:'good'|'bad'; ttl?:string; fade?:boolean };
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -1197,8 +1198,17 @@ function App() {
         const r = await fetch(getApi('/party/adventure/status'), { headers });
         const js = await r.json();
         if(js.success){
-          if(js.request && js.request.requester_id !== userId && js.request.status==='pending') setAdventurePrompt(js.request);
-          else setAdventurePrompt(null);
+          const req = js.request;
+          if(req && req.requester_id !== userId && req.status==='pending') {
+            // Если уже приняли (сохранили createdAt) или уже на экране похода — не показываем снова
+            if(acceptedAdventure && acceptedAdventure.createdAt === req.created_at && screen==='adventure') {
+              setAdventurePrompt(null);
+            } else if (!acceptedAdventure || acceptedAdventure.createdAt !== req.created_at) {
+              if(screen!== 'adventure') setAdventurePrompt(req); // показываем только если не в походе
+            }
+          } else {
+            setAdventurePrompt(null);
+          }
           if(js.request && js.request.status==='declined' && js.request.requester_id===userId){
             flashMsg('Поход отклонён');
           }
@@ -1208,7 +1218,7 @@ function App() {
     };
     loop();
     return ()=>{ stop=true; };
-  }, [getApi, userId, flashMsg]);
+  }, [getApi, userId, flashMsg, acceptedAdventure, screen]);
 
   const requestAdventure = useCallback(async ()=>{
     if(!party) { flashMsg('Нет пати'); return; }
@@ -1217,17 +1227,21 @@ function App() {
     try {
       const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
       const r = await fetch(getApi('/party/adventure/request'), { method:'POST', headers, body: JSON.stringify({}) });
-      const js = await r.json(); if(js.success){ flashMsg('Ожидание ответа пати'); } else if(js.error==='not_leader'){ flashMsg('Вы не лидер'); } else flashMsg('Ошибка запроса');
+      const js = await r.json(); if(js.success){ flashMsg('Ожидание ответа пати'); setScreen('adventure'); } else if(js.error==='not_leader'){ flashMsg('Вы не лидер'); } else flashMsg('Ошибка запроса');
     } catch{ flashMsg('Сбой'); }
-  }, [party, getApi, userId, flashMsg]);
+  }, [party, getApi, userId, flashMsg, setScreen]);
 
   const respondAdventure = useCallback(async (accept:boolean)=>{
     try {
       const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
       const r = await fetch(getApi('/party/adventure/respond'), { method:'POST', headers, body: JSON.stringify({ accept }) });
-      const js = await r.json(); if(js.success){ if(!accept) flashMsg('Отказано'); setAdventurePrompt(null); if(accept) flashMsg('Принято'); }
+      const js = await r.json(); if(js.success){ if(!accept) flashMsg('Отказано'); setAdventurePrompt(null); if(accept){ flashMsg('Принято'); // сохраняем чтобы не спамить модал
+          // сохраняем отпечаток запроса (берём текущее adventurePrompt либо вытащим через последний статус если нужно)
+          if(adventurePrompt){ setAcceptedAdventure({ partyId: adventurePrompt.party_id || (party?.partyId||''), requesterId: adventurePrompt.requester_id, createdAt: adventurePrompt.created_at }); }
+          setScreen('adventure');
+        } }
     } catch{ flashMsg('Сбой ответа'); }
-  }, [getApi, userId, flashMsg]);
+  }, [getApi, userId, flashMsg, adventurePrompt, party, setScreen]);
 
   const leaveParty = useCallback(async ()=>{
     try {
