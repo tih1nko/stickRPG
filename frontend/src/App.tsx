@@ -742,11 +742,12 @@ function App() {
       if(js.success){
         flashMsg('Приглашение отправлено');
         refreshParty();
+        refreshInvitations();
       } else {
         flashMsg('Не удалось: '+(js.error||'ошибка'));
       }
-    } catch(e){ flashMsg('Сбой приглашения'); }
-  }, [getApi, refreshParty, userId]);
+    } catch(e){ console.warn('[inviteUser] error', e); flashMsg('Сбой приглашения'); }
+  }, [getApi, refreshParty, refreshInvitations, userId]);
 
   const acceptInvite = useCallback(async (id:string)=>{
     if(!initDataRef.current && !devModeRef.current) { flashMsg('Нет авторизации'); return; }
@@ -756,7 +757,7 @@ function App() {
         : { 'Content-Type':'application/json','x-dev-user': userId || 'dev-user' };
       const r = await fetch(getApi('/party/accept'), { method:'POST', headers, body: JSON.stringify({ invitationId:id }) });
       const js = await r.json(); if(js.success){ flashMsg('В пати'); refreshParty(); refreshInvitations(); } else flashMsg('Ошибка принятия');
-    } catch{ flashMsg('Сбой принятия'); }
+    } catch(e){ console.warn('[acceptInvite] error', e); flashMsg('Сбой принятия'); }
   }, [getApi, refreshParty, refreshInvitations, userId]);
 
   const declineInvite = useCallback(async (id:string)=>{
@@ -766,8 +767,8 @@ function App() {
         ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current }
         : { 'Content-Type':'application/json','x-dev-user': userId || 'dev-user' };
       const r = await fetch(getApi('/party/decline'), { method:'POST', headers, body: JSON.stringify({ invitationId:id }) });
-      const js = await r.json(); if(js.success){ refreshInvitations(); } else flashMsg('Ошибка отклонения');
-    } catch{ flashMsg('Сбой отклонения'); }
+      const js = await r.json(); if(js.success){ refreshInvitations(); flashMsg('Отклонено'); } else flashMsg('Ошибка отклонения');
+    } catch(e){ console.warn('[declineInvite] error', e); flashMsg('Сбой отклонения'); }
   }, [getApi, refreshInvitations, userId]);
 
   const authHeaders = useCallback((): Record<string,string> => {
