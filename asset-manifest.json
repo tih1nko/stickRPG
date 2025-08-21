@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/stickRPG/static/css/main.deddcf7f.css",
+    "main.js": "/stickRPG/static/js/main.175badf3.js",
+    "static/js/453.670e15c7.chunk.js": "/stickRPG/static/js/453.670e15c7.chunk.js",
+    "index.html": "/stickRPG/index.html",
+    "main.deddcf7f.css.map": "/stickRPG/static/css/main.deddcf7f.css.map",
+    "main.175badf3.js.map": "/stickRPG/static/js/main.175badf3.js.map",
+    "453.670e15c7.chunk.js.map": "/stickRPG/static/js/453.670e15c7.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.deddcf7f.css",
+    "static/js/main.175badf3.js"
+  ]
+}
