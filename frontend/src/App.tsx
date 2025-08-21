@@ -549,7 +549,7 @@ function App() {
   const [adventurePrompt, setAdventurePrompt] = useState<any|null>(null); // данные о запросе от другого
   const [acceptedAdventure, setAcceptedAdventure] = useState<{partyId:string; requesterId:string; createdAt:number}|null>(null);
   // Состояние группового похода: 'pending' (ожидание всех) или 'active' (моб создан)
-  const [partyAdventure, setPartyAdventure] = useState<{ status:'pending'|'active'; mob?:{ name:string; hp:number; max:number; color:string; xp:number }; acceptedIds?: string[]; requesterId?: string }|null>(null);
+  const [partyAdventure, setPartyAdventure] = useState<{ status:'pending'|'active'; mob?:{ name:string; hp:number; max:number; color:string; xp:number }; acceptedIds?: string[]; requesterId?: string; damage?: Record<string,number>; xpShares?: { userId:string; xp:number }[] }|null>(null);
   // Toast notifications
   type Toast = { id:string; body:string; type?:'good'|'bad'; ttl?:string; fade?:boolean };
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -1217,7 +1217,8 @@ function App() {
             // Старт для всех
             setAdventurePrompt(null);
             if(screen!=='adventure') setScreen('adventure');
-            setPartyAdventure({ status:'active', mob: req.mob_name ? { name:req.mob_name, hp:req.mob_hp, max:req.mob_max, color:req.mob_color, xp:req.mob_xp }: undefined, requesterId: req.requester_id });
+            const damage = req.mob_damage ? (()=>{ try { return JSON.parse(req.mob_damage);}catch{return{};} })(): {};
+            setPartyAdventure({ status:'active', mob: req.mob_name ? { name:req.mob_name, hp:req.mob_hp, max:req.mob_max, color:req.mob_color, xp:req.mob_xp }: undefined, requesterId: req.requester_id, damage });
           } else if(!req && screen==='adventure') {
             // Если запрос исчез (finish) – выходим на main
             setScreen('main');
@@ -1235,6 +1236,23 @@ function App() {
     loop();
     return ()=>{ stop=true; };
   }, [getApi, userId, flashMsg, acceptedAdventure, screen]);
+
+  // Tap-to-attack: удалена авто-атака
+  const handleTapMob = useCallback(async ()=>{
+    if(!(partyAdventure?.status==='active' && partyAdventure.mob)) return;
+    if((handleTapMob as any)._cooldown) return; // простая защита от спама
+    (handleTapMob as any)._cooldown = true;
+    setTimeout(()=>{ (handleTapMob as any)._cooldown = false; }, 250);
+    try {
+  const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current || '' } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
+      const r = await fetch(getApi('/party/adventure/attack'), { method:'POST', headers, body: JSON.stringify({ tap:true }) });
+      const js = await r.json();
+      if(js.success && partyAdventure?.mob){
+        setPartyAdventure(p=> p && p.mob ? { ...p, mob: { ...p.mob, hp: js.mob_hp }, damage: js.damage||p.damage, xpShares: js.xpShares||p.xpShares } : p);
+        if(js.defeated){ flashMsg('Моб побеждён!'); fetch(getApi('/party/adventure/finish'), { method:'POST', headers }).catch(()=>{}); }
+      }
+    } catch{}
+  }, [partyAdventure, getApi, userId, flashMsg]);
 
   const requestAdventure = useCallback(async ()=>{
     if(!party) { flashMsg('Нет пати'); return; }
@@ -1364,26 +1382,34 @@ function App() {
   <main className={`main main-stage${isFight ? ' fight' : ' travel'}`} ref={stageRef as any}>
             <div className="stage-bg-main" />
             <div className="stage-ground-main" />
+            {/* Overlay моба с полоской HP и областью тапа */}
             {partyAdventure?.status==='active' && partyAdventure.mob && (
-              <div style={{ position:'absolute', top:12, left:'50%', transform:'translateX(-50%)', background:'#17242bcc', padding:'10px 14px', borderRadius:14, display:'flex', flexDirection:'column', alignItems:'center', gap:6, boxShadow:'0 4px 12px -4px #000a', zIndex:40, minWidth:220 }}>
-                <div style={{fontSize:13, fontWeight:600}}>{partyAdventure.mob.name}</div>
-                <div style={{width:180, height:10, background:'#2a363d', borderRadius:6, overflow:'hidden', boxShadow:'0 0 0 1px #1c292f inset'}}>
-                  <div style={{height:'100%', width:`${(partyAdventure.mob.hp/partyAdventure.mob.max)*100}%`, background:'linear-gradient(90deg,#f55,#faa)'}} />
+              <div onClick={handleTapMob} onTouchStart={handleTapMob} style={{ position:'absolute', top:12, left:'50%', transform:'translateX(-50%)', background:'#17242bcc', padding:'10px 16px', borderRadius:18, display:'flex', flexDirection:'column', alignItems:'center', gap:6, boxShadow:'0 4px 14px -4px #000a', zIndex:40, minWidth:240, cursor:'pointer', userSelect:'none' }}>
+                <div style={{fontSize:14, fontWeight:600, letterSpacing:.5}}>{partyAdventure.mob.name}</div>
+                <div style={{width:200, height:12, background:'#24333c', borderRadius:8, overflow:'hidden', boxShadow:'0 0 0 1px #1a2a30 inset'}}>
+                  <div style={{height:'100%', width:`${(partyAdventure.mob.hp/partyAdventure.mob.max)*100}%`, background:'linear-gradient(90deg,#f44,#f99)', transition:'width .18s'}} />
                 </div>
                 <div style={{fontSize:11, opacity:.75}}>{partyAdventure.mob.hp}/{partyAdventure.mob.max} HP</div>
-                <div style={{display:'flex', gap:8}}>
-                  <button className="btn btn-small" onClick={async()=>{
-                    try {
-                      const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
-                      const r = await fetch(getApi('/party/adventure/attack'), { method:'POST', headers, body: JSON.stringify({}) });
-                      const js = await r.json();
-                      if(js.success && partyAdventure?.mob){
-                        setPartyAdventure(p=> p && p.mob ? { ...p, mob: { ...p.mob, hp: js.mob_hp } } : p);
-                        if(js.defeated) flashMsg('Моб побеждён!');
-                      }
-                    } catch{}
-                  }}>Атаковать</button>
-                </div>
+                {partyAdventure.damage && party && (
+                  <div style={{display:'flex', flexDirection:'column', gap:2, background:'#1d2a30', padding:'6px 8px', borderRadius:12, width:'100%'}}>
+                    {party.members.map((m:any)=>{
+                      const d = partyAdventure.damage?.[String(m.id)]||0;
+                      const total = Object.values(partyAdventure.damage||{}).reduce((a,b)=> a + (b||0),0)||1;
+                      const pct = Math.round(d*100/total);
+                      return <div key={m.id} style={{display:'flex', alignItems:'center', gap:6, fontSize:10}}>
+                        <span style={{flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{(m.first_name||m.username||m.id).slice(0,10)}</span>
+                        <div style={{width:70, height:6, background:'#223037', borderRadius:4, overflow:'hidden'}}>
+                          <div style={{height:'100%', width:`${pct}%`, background:'#5ca9f3'}} />
+                        </div>
+                        <span style={{width:34, textAlign:'right', opacity:.7}}>{d}</span>
+                      </div>;
+                    })}
+                  </div>
+                )}
+                {partyAdventure.xpShares && partyAdventure.xpShares.length>0 && (
+                  <div style={{fontSize:10, opacity:.55}}>XP распределён (клиентское отображение)</div>
+                )}
+                <div style={{fontSize:10, opacity:.4}}>Тапайте чтобы атаковать</div>
               </div>
             )}
             {partyAdventure?.status==='pending' && (
@@ -1418,16 +1444,18 @@ function App() {
                 </div>
               ))}
             </div>
-            <Adventure
-              embedded
-              onExit={() => setScreen('main')}
-              onLoot={addItem}
-              onKill={xp => { handleKill(xp); }}
-              attackBonus={totalAttackBonus}
-              playerSprite={playerSprite}
-              onFightChange={setIsFight}
-        stageRef={stageRef as any}
-            />
+            {partyAdventure?.status==='active' && (
+              <Adventure
+                embedded
+                onExit={() => setScreen('main')}
+                onLoot={addItem}
+                onKill={xp => { handleKill(xp); }}
+                attackBonus={totalAttackBonus}
+                playerSprite={playerSprite}
+                onFightChange={setIsFight}
+                stageRef={stageRef as any}
+              />
+            )}
           </main>
           <footer className="footer">
             <button onClick={async () => {

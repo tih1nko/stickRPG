@@ -290,6 +290,7 @@ try {
   addAdvCol('mob_max','INTEGER');
   addAdvCol('mob_color','TEXT');
   addAdvCol('mob_xp','INTEGER');
+  addAdvCol('mob_damage','TEXT'); // JSON { userId: damage }
 } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[MIGRATE accepted_ids] failed', e.message); }
 // MIGRATE notif_sent
 try {
@@ -886,8 +887,8 @@ app.post('/party/adventure/request', authMiddleware, (req,res)=>{
   const mem = db.prepare("SELECT role FROM party_members WHERE party_id=? AND user_id=?").get(partyId, req.tgUser.id);
   if(!mem || mem.role !== 'leader') return res.status(403).json({ success:false, error:'not_leader' });
     // Upsert request (replace existing)
-  db.prepare('INSERT INTO party_adventure_requests(party_id, requester_id, created_at, status, decliner_id, accepted_ids, mob_name, mob_hp, mob_max, mob_color, mob_xp) VALUES(?,?,?,?,NULL,?,?,?,?,?,?) ON CONFLICT(party_id) DO UPDATE SET requester_id=excluded.requester_id, created_at=excluded.created_at, status=excluded.status, decliner_id=NULL, accepted_ids=excluded.accepted_ids, mob_name=NULL, mob_hp=NULL, mob_max=NULL, mob_color=NULL, mob_xp=NULL')
-      .run(partyId, req.tgUser.id, Date.now(), 'pending', '', null, null, null, null, null);
+    db.prepare('INSERT INTO party_adventure_requests(party_id, requester_id, created_at, status, decliner_id, accepted_ids, mob_name, mob_hp, mob_max, mob_color, mob_xp, mob_damage) VALUES(?,?,?,?,NULL,?,?,?,?,?,?,?) ON CONFLICT(party_id) DO UPDATE SET requester_id=excluded.requester_id, created_at=excluded.created_at, status=excluded.status, decliner_id=NULL, accepted_ids=excluded.accepted_ids, mob_name=NULL, mob_hp=NULL, mob_max=NULL, mob_color=NULL, mob_xp=NULL, mob_damage=NULL')
+      .run(partyId, req.tgUser.id, Date.now(), 'pending', '', null, null, null, null, null, null);
     res.json({ success:true });
   } catch(e){ res.status(500).json({ success:false, error:'adventure_request_failed' }); }
 });
@@ -971,10 +972,19 @@ app.post('/party/adventure/attack', authMiddleware, (req,res)=>{
     // базовый урон
     const dmg = 3 + Math.floor(Math.random()*3);
     const newHp = Math.max(0, reqRow.mob_hp - dmg);
-    db.prepare('UPDATE party_adventure_requests SET mob_hp=? WHERE party_id=?').run(newHp, partyId);
-    let defeated = false;
-    if(newHp === 0){ defeated = true; }
-    res.json({ success:true, mob_hp:newHp, mob_max:reqRow.mob_max, defeated, dmg, mob_xp:reqRow.mob_xp });
+    // damage log
+    let damageLog = {};
+    if(reqRow.mob_damage){ try { damageLog = JSON.parse(reqRow.mob_damage); } catch { damageLog = {}; } }
+    const uid = String(req.tgUser.id);
+    damageLog[uid] = (damageLog[uid]||0) + dmg;
+    db.prepare('UPDATE party_adventure_requests SET mob_hp=?, mob_damage=? WHERE party_id=?').run(newHp, JSON.stringify(damageLog), partyId);
+    let defeated = false; let xpShares=null;
+    if(newHp === 0){ defeated = true; // compute xp split
+      const totalDmg = Object.values(damageLog).reduce((a,b)=> a + (typeof b==='number'? b:0),0) || 1;
+      const members = db.prepare('SELECT user_id FROM party_members WHERE party_id=?').all(partyId).map(r=> String(r.user_id));
+      xpShares = members.map(id=>({ userId:id, xp: Math.round(reqRow.mob_xp * ( (damageLog[id]||0)/ totalDmg )) }));
+    }
+    res.json({ success:true, mob_hp:newHp, mob_max:reqRow.mob_max, defeated, dmg, mob_xp:reqRow.mob_xp, damage:damageLog, xpShares });
   } catch(e){ res.status(500).json({ success:false, error:'attack_failed' }); }
 });
 
