@@ -862,6 +862,9 @@ app.post('/party/adventure/request', authMiddleware, (req,res)=>{
     const row = db.prepare('SELECT party_id FROM users WHERE id=?').get(req.tgUser.id);
     if(!row || !row.party_id) return res.status(400).json({ success:false, error:'no_party' });
     const partyId = row.party_id;
+  // Проверяем что инициатор лидер
+  const mem = db.prepare("SELECT role FROM party_members WHERE party_id=? AND user_id=?").get(partyId, req.tgUser.id);
+  if(!mem || mem.role !== 'leader') return res.status(403).json({ success:false, error:'not_leader' });
     // Upsert request (replace existing)
     db.prepare('INSERT INTO party_adventure_requests(party_id, requester_id, created_at, status, decliner_id) VALUES(?,?,?,?,NULL) ON CONFLICT(party_id) DO UPDATE SET requester_id=excluded.requester_id, created_at=excluded.created_at, status=excluded.status, decliner_id=NULL')
       .run(partyId, req.tgUser.id, Date.now(), 'pending');

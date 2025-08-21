@@ -1192,10 +1192,12 @@ function App() {
 
   const requestAdventure = useCallback(async ()=>{
     if(!party) { flashMsg('Нет пати'); return; }
+    const me = party.members?.find((m:any)=> m.id === userId);
+    if(!me || me.role !== 'leader'){ flashMsg('Только лидер может начинать поход'); return; }
     try {
       const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
       const r = await fetch(getApi('/party/adventure/request'), { method:'POST', headers, body: JSON.stringify({}) });
-      const js = await r.json(); if(js.success){ flashMsg('Ожидание ответа пати'); } else flashMsg('Ошибка запроса');
+      const js = await r.json(); if(js.success){ flashMsg('Ожидание ответа пати'); } else if(js.error==='not_leader'){ flashMsg('Вы не лидер'); } else flashMsg('Ошибка запроса');
     } catch{ flashMsg('Сбой'); }
   }, [party, getApi, userId]);
 
@@ -1251,7 +1253,7 @@ function App() {
           <footer className="footer">
             <button onClick={() => setScreen('inventory')}>Инвентарь</button>
             <button onClick={() => setScreen('adventure')}>Поход</button>
-            {party && <button onClick={requestAdventure}>Начать поход (пати)</button>}
+            {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && <button onClick={requestAdventure}>Начать поход (пати)</button>}
             <button onClick={() => setScreen('combo')}>Персонаж</button>
             <button onClick={() => setPartyModal(true)}>Пати</button>
           </footer>
