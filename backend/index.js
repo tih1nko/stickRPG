@@ -59,6 +59,8 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: v.error || 'invalid init data' });
   }
   req.tgUser = { id: String(v.user.id) };
+  // сохраним объект для последующего возможного апдейта (в /auth делается основной апдейт)
+  req.tgUserMeta = v.user;
   return next();
 }
 
@@ -224,8 +226,41 @@ try {
   addCol('accessory_slot','TEXT','flower');
   addCol('stickman_anim','TEXT'); // JSON с анимациями (walk/attack)
   addCol('coins','INTEGER',0); // внутренняя валюта
+  addCol('username','TEXT');
+  addCol('first_name','TEXT');
+  addCol('last_name','TEXT');
+  addCol('party_id','TEXT');
 } catch (e) {
   if (process.env.NODE_ENV !== 'production') console.warn('User table alter failed (maybe not created yet).', e.message);
+}
+
+// Party tables (idempotent creation)
+try {
+  db.prepare(`CREATE TABLE IF NOT EXISTS party_invitations (
+    id TEXT PRIMARY KEY,
+    from_user_id TEXT,
+    to_user_id TEXT,
+    party_id TEXT,
+    status TEXT,
+    created_at INTEGER
+  )`).run();
+  db.prepare(`CREATE TABLE IF NOT EXISTS party_members (
+    party_id TEXT,
+    user_id TEXT,
+    role TEXT,
+    joined_at INTEGER,
+    PRIMARY KEY (party_id, user_id)
+  )`).run();
+} catch(e) {
+  if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA party] failed', e.message);
+}
+
+function updateUserMeta(user){
+  if(!user || !user.id) return;
+  try {
+    db.prepare('UPDATE users SET username=COALESCE(?,username), first_name=COALESCE(?,first_name), last_name=COALESCE(?,last_name) WHERE id=?')
+      .run(user.username || null, user.first_name || null, user.last_name || null, String(user.id));
+  } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[USER META] update failed', e.message); }
 }
 
 function validatePayload(body) {
@@ -525,10 +560,118 @@ app.post('/auth', (req, res) => {
   const { initData } = req.body || {};
   const v = verifyTelegramInitData(initData);
   if (!v.ok) return res.status(401).json({ success: false, error: v.error });
+  updateUserMeta(v.user);
   res.json({ success: true, user: v.user });
 });
 
 app.get('/ping', (_req, res) => res.json({ pong: true, time: Date.now() }));
+
+// ================= PARTY API =================
+function getOrCreatePartyForLeader(leaderId){
+  const ex = db.prepare('SELECT party_id FROM party_members WHERE user_id=? AND role="leader"').get(leaderId);
+  if (ex && ex.party_id) return ex.party_id;
+  const partyId = 'p_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+  db.prepare('INSERT OR IGNORE INTO party_members(party_id,user_id,role,joined_at) VALUES(?,?,?,?)')
+    .run(partyId, leaderId, 'leader', Date.now());
+  db.prepare('UPDATE users SET party_id=? WHERE id=?').run(partyId, leaderId);
+  return partyId;
+}
+
+// Search users by username prefix (case-insensitive)
+app.get('/party/search', authMiddleware, (req,res)=>{
+  const q = (req.query.q||'').toString().trim();
+  if(!q) return res.json({ success:true, results: [] });
+  try {
+    const rows = db.prepare('SELECT id, username, first_name, last_name FROM users WHERE username LIKE ? ORDER BY updated_at DESC LIMIT 10')
+      .all(q+'%');
+    res.json({ success:true, results: rows });
+  } catch(e){ res.status(500).json({ success:false, error:'search_failed' }); }
+});
+
+// Invite
+app.post('/party/invite', authMiddleware, (req,res)=>{
+  const { username } = req.body || {};
+  if(!username) return res.status(400).json({ success:false, error:'missing_username' });
+  try {
+    const target = db.prepare('SELECT id FROM users WHERE lower(username)=lower(?)').get(username);
+    if(!target) return res.status(404).json({ success:false, error:'user_not_found' });
+    if(String(target.id) === String(req.tgUser.id)) return res.status(400).json({ success:false, error:'self_invite' });
+    const partyId = getOrCreatePartyForLeader(req.tgUser.id);
+    const dupe = db.prepare('SELECT id FROM party_invitations WHERE from_user_id=? AND to_user_id=? AND party_id=? AND status="pending"')
+      .get(req.tgUser.id, target.id, partyId);
+    if(dupe) return res.json({ success:true, invitationId: dupe.id, duplicate:true, partyId });
+    const invId = 'inv_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    db.prepare('INSERT INTO party_invitations(id,from_user_id,to_user_id,party_id,status,created_at) VALUES(?,?,?,?,?,?)')
+      .run(invId, req.tgUser.id, target.id, partyId, 'pending', Date.now());
+    res.json({ success:true, invitationId: invId, partyId });
+  } catch(e){ res.status(500).json({ success:false, error:'invite_failed' }); }
+});
+
+// Incoming invitations
+app.get('/party/invitations', authMiddleware, (req,res)=>{
+  try {
+    const rows = db.prepare('SELECT id, from_user_id, party_id, created_at FROM party_invitations WHERE to_user_id=? AND status="pending" ORDER BY created_at DESC')
+      .all(req.tgUser.id);
+    const enriched = rows.map(r=>{
+      const u = db.prepare('SELECT username, first_name, last_name FROM users WHERE id=?').get(r.from_user_id) || {};
+      return { ...r, from: { id:r.from_user_id, username:u.username, first_name:u.first_name, last_name:u.last_name } };
+    });
+    res.json({ success:true, invitations: enriched });
+  } catch(e){ res.status(500).json({ success:false, error:'list_failed' }); }
+});
+
+// Accept invitation
+app.post('/party/accept', authMiddleware, (req,res)=>{
+  const { invitationId } = req.body || {};
+  if(!invitationId) return res.status(400).json({ success:false, error:'missing_invitationId' });
+  try {
+    const inv = db.prepare('SELECT * FROM party_invitations WHERE id=?').get(invitationId);
+    if(!inv || inv.to_user_id !== String(req.tgUser.id) || inv.status !== 'pending') return res.status(404).json({ success:false, error:'invitation_not_found' });
+    db.transaction(()=>{
+      db.prepare('UPDATE party_invitations SET status="accepted" WHERE id=?').run(invitationId);
+      db.prepare('INSERT OR IGNORE INTO party_members(party_id,user_id,role,joined_at) VALUES(?,?,?,?)')
+        .run(inv.party_id, req.tgUser.id, 'member', Date.now());
+      db.prepare('UPDATE users SET party_id=? WHERE id=?').run(inv.party_id, req.tgUser.id);
+    })();
+    res.json({ success:true, partyId: inv.party_id });
+  } catch(e){ res.status(500).json({ success:false, error:'accept_failed' }); }
+});
+
+// Decline
+app.post('/party/decline', authMiddleware, (req,res)=>{
+  const { invitationId } = req.body || {};
+  if(!invitationId) return res.status(400).json({ success:false, error:'missing_invitationId' });
+  try {
+    const inv = db.prepare('SELECT * FROM party_invitations WHERE id=?').get(invitationId);
+    if(!inv || inv.to_user_id !== String(req.tgUser.id) || inv.status !== 'pending') return res.status(404).json({ success:false, error:'invitation_not_found' });
+    db.prepare('UPDATE party_invitations SET status="declined" WHERE id=?').run(invitationId);
+    res.json({ success:true });
+  } catch(e){ res.status(500).json({ success:false, error:'decline_failed' }); }
+});
+
+// Party state
+app.get('/party/state', authMiddleware, (req,res)=>{
+  try {
+    const row = db.prepare('SELECT party_id FROM users WHERE id=?').get(req.tgUser.id);
+    if(!row || !row.party_id) return res.json({ success:true, party:null });
+    const partyId = row.party_id;
+    const members = db.prepare('SELECT pm.user_id, pm.role, u.username, u.first_name, u.last_name, u.stickman_anim, u.skin_tone, u.hair_style, u.hair_color, u.eye_color, u.top_slot, u.bottom_slot, u.accessory_slot FROM party_members pm JOIN users u ON u.id=pm.user_id WHERE pm.party_id=?')
+      .all(partyId);
+    const formatted = members.map(m=>{
+      let anim=null; try{ if(m.stickman_anim) anim=JSON.parse(m.stickman_anim);}catch{}
+      return {
+        id: m.user_id,
+        role: m.role,
+        username: m.username,
+        first_name: m.first_name,
+        last_name: m.last_name,
+        customization: { skinTone:m.skin_tone, hairStyle:m.hair_style, hairColor:m.hair_color, eyeColor:m.eye_color, top:m.top_slot, bottom:m.bottom_slot, accessory:m.accessory_slot },
+        animations: anim
+      };
+    });
+    res.json({ success:true, party:{ partyId, members: formatted } });
+  } catch(e){ res.status(500).json({ success:false, error:'party_state_failed' }); }
+});
 
 // DEBUG: кто я по заголовку x-telegram-init
 app.get('/debug/whoami', (req, res) => {

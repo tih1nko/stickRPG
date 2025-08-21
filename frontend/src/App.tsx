@@ -539,6 +539,13 @@ function App() {
   const [userId, setUserId] = useState<string>('');
   const [tgUser, setTgUser] = useState<any | null>(null);
   const [saveStatus, setSaveStatus] = useState<{ status: 'idle' | 'saving' | 'ok' | 'error'; lastSuccess?: number; error?: string }>({ status: 'idle' });
+  // Party
+  const [party, setParty] = useState<any|null>(null);
+  const [partyModal, setPartyModal] = useState(false);
+  const [partySearch, setPartySearch] = useState('');
+  const [partyResults, setPartyResults] = useState<any[]>([]);
+  const [partyInvites, setPartyInvites] = useState<any[]>([]);
+  const partyLoadingRef = useRef(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const initDataRef = useRef<string | null>(null);
   const devModeRef = useRef<boolean>(false);
@@ -611,6 +618,8 @@ function App() {
         }
         setUserId(uid);
         setTgUser(userObj);
+  // после загрузки пользователя подтянем состояние party
+  try { await refreshParty(); } catch {}
   const loadResp = await fetch(getApiRef.current(`/load/${uid}`), {
           headers: initDataRef.current ? { 'x-telegram-init': initDataRef.current } : { 'x-dev-user': uid }
         });
@@ -668,7 +677,70 @@ function App() {
         if (process.env.NODE_ENV !== 'production') console.warn('Load/auth failed', e);
       }
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshInvitations = useCallback(async ()=>{
+    if (!initDataRef.current) return;
+    try {
+      const r = await fetch(getApi('/party/invitations'), { headers: { 'x-telegram-init': initDataRef.current } });
+      const js = await r.json(); if (js.success) setPartyInvites(js.invitations||[]);
+    } catch{}
+  }, [getApi]);
+
+  const refreshParty = useCallback(async ()=>{
+    if (!initDataRef.current) return;
+    try {
+      const r = await fetch(getApi('/party/state'), { headers: { 'x-telegram-init': initDataRef.current } });
+      const js = await r.json(); if (js.success) setParty(js.party);
+    } catch{}
+  }, [getApi]);
+
+  // периодический поллинг party и приглашений
+  useEffect(()=>{
+    if (!initDataRef.current) return;
+    let stop=false;
+    const loop=async()=>{
+      if(stop) return;
+      await Promise.all([refreshParty(), refreshInvitations()]);
+      setTimeout(loop, 6000);
+    };
+    loop();
+    return ()=>{ stop=true; };
+  }, [refreshParty, refreshInvitations]);
+
+  const searchPartyUsers = useCallback(async (q:string)=>{
+    if (!initDataRef.current || !q) { setPartyResults([]); return; }
+    if (partyLoadingRef.current) return; partyLoadingRef.current=true;
+    try {
+      const r = await fetch(getApi('/party/search?q='+encodeURIComponent(q)), { headers:{ 'x-telegram-init': initDataRef.current } });
+      const js = await r.json(); if (js.success) setPartyResults(js.results||[]);
+    } catch{} finally { partyLoadingRef.current=false; }
+  }, [getApi]);
+
+  const inviteUser = useCallback(async (username:string)=>{
+    if(!initDataRef.current) return;
+    try {
+      const r = await fetch(getApi('/party/invite'), { method:'POST', headers:{ 'Content-Type':'application/json','x-telegram-init': initDataRef.current }, body: JSON.stringify({ username }) });
+      const js = await r.json(); if(js.success){ flashMsg('Приглашение отправлено'); refreshParty(); }
+    } catch{}
+  }, [getApi, refreshParty]);
+
+  const acceptInvite = useCallback(async (id:string)=>{
+    if(!initDataRef.current) return;
+    try {
+      const r = await fetch(getApi('/party/accept'), { method:'POST', headers:{ 'Content-Type':'application/json','x-telegram-init': initDataRef.current }, body: JSON.stringify({ invitationId:id }) });
+      const js = await r.json(); if(js.success){ flashMsg('В пати'); refreshParty(); refreshInvitations(); }
+    } catch{}
+  }, [getApi, refreshParty, refreshInvitations]);
+
+  const declineInvite = useCallback(async (id:string)=>{
+    if(!initDataRef.current) return;
+    try {
+      const r = await fetch(getApi('/party/decline'), { method:'POST', headers:{ 'Content-Type':'application/json','x-telegram-init': initDataRef.current }, body: JSON.stringify({ invitationId:id }) });
+      const js = await r.json(); if(js.success){ refreshInvitations(); }
+    } catch{}
+  }, [getApi, refreshInvitations]);
 
   const authHeaders = useCallback((): Record<string,string> => {
     const base: Record<string,string> = initDataRef.current
@@ -1027,6 +1099,15 @@ function App() {
     return null;
   }, [stickmanAnim, stickmanFrame, currentAnim, inventory, screen]);
 
+  const partySprites = useMemo(()=>{
+    if(!party || !party.members) return null;
+    return party.members.filter((m:any)=> m.id !== userId).slice(0,3).map((m:any, idx:number)=>{
+      // Простая заглушка: кружок с инициалами; позже можно отрисовать по его animations
+      const initials = (m.first_name||m.username||m.id).slice(0,2).toUpperCase();
+      return <div key={m.id} style={{ position:'absolute', left:`calc(50% + ${(idx+1)*70}px)`, bottom: 12, width:64, height:64, borderRadius:'50%', background:'#24333c', display:'flex', alignItems:'center', justifyContent:'center', color:'#6cf', fontSize:18, fontWeight:600, boxShadow:'0 0 0 2px #1b262d, 0 0 6px #000' }}>{initials}</div>;
+    });
+  }, [party, userId]);
+
 
   return (
     <div className="container">
@@ -1057,12 +1138,14 @@ function App() {
             <div className="stage-bg-main" />
             <div className="stage-ground-main" />
             {playerSprite}
+            {partySprites}
             <EquippedBadge />
           </main>
           <footer className="footer">
             <button onClick={() => setScreen('inventory')}>Инвентарь</button>
             <button onClick={() => setScreen('adventure')}>Поход</button>
             <button onClick={() => setScreen('combo')}>Персонаж</button>
+            <button onClick={() => setPartyModal(true)}>Пати</button>
           </footer>
           <div className="screen">
             {message && <div style={{ animation: 'fadeIn 0.3s', color: '#6cf', marginTop:4 }}>{message}</div>}
@@ -1166,6 +1249,42 @@ function App() {
               <button disabled={selling} onClick={()=> sellItem(sellModalItem.id)} style={{background:'#c44949'}}>
                 {selling ? '...' : 'Продать'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {partyModal && (
+        <div className="modal-backdrop" onMouseDown={(e)=>{ if(e.target===e.currentTarget) setPartyModal(false); }}>
+          <div className="modal" style={{ maxWidth:360 }}>
+            <h3 style={{marginTop:0}}>Пати</h3>
+            <div style={{display:'flex', gap:6, marginBottom:10}}>
+              <input value={partySearch} onChange={e=>{ setPartySearch(e.target.value); searchPartyUsers(e.target.value); }} placeholder="Поиск по username" style={{flex:1}} />
+              <button onClick={()=> searchPartyUsers(partySearch)}>Поиск</button>
+            </div>
+            <div style={{maxHeight:120, overflowY:'auto', marginBottom:10, border:'1px solid #233038', padding:6, borderRadius:6}}>
+              {partyResults.length===0 && <div style={{opacity:.5, fontSize:12}}>Нет результатов</div>}
+              {partyResults.map(u=>(
+                <div key={u.id} style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'4px 2px', borderBottom:'1px solid #1f2a31'}}>
+                  <span style={{fontSize:12}}>@{u.username||'—'} {(u.first_name||'')}</span>
+                  <button onClick={()=> inviteUser(u.username)} style={{fontSize:11, padding:'4px 8px'}}>+</button>
+                </div>
+              ))}
+            </div>
+            <div style={{fontSize:12, fontWeight:600, marginBottom:4}}>Приглашения</div>
+            <div style={{maxHeight:100, overflowY:'auto', border:'1px solid #233038', padding:6, borderRadius:6}}>
+              {partyInvites.length===0 && <div style={{opacity:.5, fontSize:12}}>Нет приглашений</div>}
+              {partyInvites.map(inv=>(
+                <div key={inv.id} style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:6, padding:'4px 2px', borderBottom:'1px solid #1f2a31'}}>
+                  <span style={{fontSize:12}}>от @{inv.from?.username||inv.from?.id}</span>
+                  <div style={{display:'flex', gap:4}}>
+                    <button onClick={()=> acceptInvite(inv.id)} style={{fontSize:11, padding:'3px 8px'}}>OK</button>
+                    <button onClick={()=> declineInvite(inv.id)} style={{fontSize:11, padding:'3px 8px'}}>X</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex', justifyContent:'flex-end', marginTop:12}}>
+              <button onClick={()=> setPartyModal(false)}>Закрыть</button>
             </div>
           </div>
         </div>

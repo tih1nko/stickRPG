@@ -2,8 +2,10 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders learn react link', () => {
+// Smoke test: проверяем, что базовые кнопки футера отображаются
+test('renders main footer buttons', () => {
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Инвентарь/i })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Поход/i })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Персонаж/i })).toBeInTheDocument();
 });
