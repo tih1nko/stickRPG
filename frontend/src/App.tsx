@@ -1252,8 +1252,13 @@ function App() {
           </main>
           <footer className="footer">
             <button onClick={() => setScreen('inventory')}>Инвентарь</button>
-            <button onClick={() => setScreen('adventure')}>Поход</button>
-            {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && <button onClick={requestAdventure}>Начать поход (пати)</button>}
+            {!party && <button onClick={() => setScreen('adventure')}>Поход</button>}
+            {party && party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
+              <button onClick={requestAdventure}>Начать поход (пати)</button>
+            )}
+            {party && !party.members?.find((m:any)=> m.id===userId && m.role==='leader') && (
+              <button disabled style={{opacity:.55}}>Ждём лидера</button>
+            )}
             <button onClick={() => setScreen('combo')}>Персонаж</button>
             <button onClick={() => setPartyModal(true)}>Пати</button>
           </footer>
