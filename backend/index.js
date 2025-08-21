@@ -3,7 +3,8 @@ const cors = require('cors');
 const path = require('path');
 const Database = require('better-sqlite3');
 const fs = require('fs');
-require('dotenv').config();
+// Явно грузим .env из папки backend, даже если процесс стартован из корня
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const crypto = require('crypto');
 // Верификация initData из Telegram WebApp
 // Документация: https://core.telegram.org/bots/webapps#validating-data-received-via-the-web-app
