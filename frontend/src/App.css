@@ -136,6 +136,16 @@ body {
 .main-stage.travel.fight .stage-ground-main,
 .main-stage.travel.fight .stage-ground-main:before { animation-play-state: paused; }
 .stage-bg-main:after { animation: skyScroll 12s linear infinite; animation-play-state: paused; }
+.toasts-container { position:absolute; top:10px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; gap:10px; z-index:120; width:calc(100% - 40px); max-width:420px; pointer-events:none; }
+.toast { position:relative; background:linear-gradient(145deg,#223038,#182026); border:1px solid #2d3a42; border-radius:16px; padding:10px 14px 12px; color:#dff2ff; font-size:13px; font-weight:500; letter-spacing:.4px; box-shadow:0 6px 20px -8px #000c, 0 2px 8px -3px #000a, inset 0 0 0 1px #1c272d; backdrop-filter:blur(6px) saturate(1.2); overflow:hidden; animation: toastIn .45s cubic-bezier(.4,.2,.2,1); }
+.toast:before { content:''; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--grad-accent); border-radius:16px 0 0 16px; box-shadow:0 0 0 1px #46f2c233 inset; }
+.toast.good:before { background:linear-gradient(180deg,#46d982,#2fa563); }
+.toast.bad:before { background:linear-gradient(180deg,#ff5f56,#ff8f56); }
+.toast .ttl { font-size:11px; text-transform:uppercase; opacity:.7; letter-spacing:1px; margin-bottom:2px; }
+.toast .body { line-height:1.25; }
+.toast.fade-out { animation: toastOut .5s forwards; }
+@keyframes toastIn { from { opacity:0; transform:translate(-50%, -14px); } to { opacity:1; transform:translate(-50%,0); } }
+@keyframes toastOut { to { opacity:0; transform:translate(-50%, -8px); } }
 .main-stage.travel .stage-bg-main:after { animation-play-state: running; }
 .stage-player { bottom:70px !important; transition: transform .25s; }
 @keyframes skyPulse { 0%,100% { filter:brightness(1); } 50% { filter:brightness(1.08); } }

@@ -547,6 +547,35 @@ function App() {
   const [partyInvites, setPartyInvites] = useState<any[]>([]);
   const [partySentInvites, setPartySentInvites] = useState<any[]>([]);
   const [adventurePrompt, setAdventurePrompt] = useState<any|null>(null); // данные о запросе от другого
+  // Toast notifications
+  type Toast = { id:string; body:string; type?:'good'|'bad'; ttl?:string; fade?:boolean };
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const pushToast = useCallback((body:string, opts?:{ type?:'good'|'bad'; ttl?:string; timeout?:number })=>{
+    const id = Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+    const toast:Toast = { id, body, type: opts?.type, ttl: opts?.ttl };
+    setToasts(prev => [...prev.slice(-4), toast]); // максимум 5 (новый + 4 предыдущих)
+    const timeout = opts?.timeout ?? 4000;
+    // Планируем исчезновение
+    setTimeout(()=>{
+      setToasts(prev => prev.map(t=> t.id===id ? { ...t, fade:true }: t));
+      setTimeout(()=> setToasts(prev => prev.filter(t=> t.id!==id)), 520);
+    }, timeout);
+  }, []);
+  const flashMsg = useCallback((txt: string) => {
+    let type: 'good'|'bad'|undefined;
+    if (/ошиб|сбой|fail|нет |не /i.test(txt)) type = 'bad';
+    else if (/(\+\d+)|(уровень)|(в пати)|(отправлено)|(дроп)/i.test(txt)) type = 'good';
+    let ttl: string | undefined;
+    if (/afk/i.test(txt)) ttl = 'AFK';
+    else if (/уровень/i.test(txt)) ttl = 'Level';
+    else if (/пати|приглаш/i.test(txt)) ttl = 'Пати';
+    else if (/поход/i.test(txt)) ttl = 'Поход';
+    else if (/монет/i.test(txt)) ttl = 'Монеты';
+    else if (/предмет|дроп/i.test(txt)) ttl = 'Лут';
+    pushToast(txt, { type, ttl });
+    setMessage(txt);
+    setTimeout(() => setMessage(null), 2000);
+  }, [pushToast]);
   const partyLoadingRef = useRef(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const initDataRef = useRef<string | null>(null);
@@ -761,7 +790,7 @@ function App() {
         flashMsg('Не удалось: '+(js.error||'ошибка'));
       }
     } catch(e){ console.warn('[inviteUser] error', e); flashMsg('Сбой приглашения'); }
-  }, [getApi, refreshParty, refreshInvitations, refreshSentInvitations, userId]);
+  }, [getApi, refreshParty, refreshInvitations, refreshSentInvitations, userId, flashMsg]);
 
   const acceptInvite = useCallback(async (id:string)=>{
     if(!initDataRef.current && !devModeRef.current) { flashMsg('Нет авторизации'); return; }
@@ -772,7 +801,7 @@ function App() {
       const r = await fetch(getApi('/party/accept'), { method:'POST', headers, body: JSON.stringify({ invitationId:id }) });
   const js = await r.json(); if(js.success){ flashMsg('В пати'); refreshParty(); refreshInvitations(); refreshSentInvitations(); } else flashMsg('Ошибка принятия');
     } catch(e){ console.warn('[acceptInvite] error', e); flashMsg('Сбой принятия'); }
-  }, [getApi, refreshParty, refreshInvitations, refreshSentInvitations, userId]);
+  }, [getApi, refreshParty, refreshInvitations, refreshSentInvitations, userId, flashMsg]);
 
   const declineInvite = useCallback(async (id:string)=>{
     if(!initDataRef.current && !devModeRef.current) { flashMsg('Нет авторизации'); return; }
@@ -783,7 +812,7 @@ function App() {
       const r = await fetch(getApi('/party/decline'), { method:'POST', headers, body: JSON.stringify({ invitationId:id }) });
   const js = await r.json(); if(js.success){ refreshInvitations(); refreshSentInvitations(); flashMsg('Отклонено'); } else flashMsg('Ошибка отклонения');
     } catch(e){ console.warn('[declineInvite] error', e); flashMsg('Сбой отклонения'); }
-  }, [getApi, refreshInvitations, refreshSentInvitations, userId]);
+  }, [getApi, refreshInvitations, refreshSentInvitations, userId, flashMsg]);
 
   const authHeaders = useCallback((): Record<string,string> => {
     const base: Record<string,string> = initDataRef.current
@@ -890,10 +919,7 @@ function App() {
 
   // Функции экипировки удалены из UI инвентаря (теперь только статус)
 
-  const flashMsg = (txt: string) => {
-    setMessage(txt);
-    setTimeout(() => setMessage(null), 2000);
-  };
+  // (flashMsg определён выше)
 
   // Состояния модального окна продажи
   const [sellModalItem, setSellModalItem] = useState<Item|null>(null);
@@ -1029,13 +1055,7 @@ function App() {
 
   const displayName = tgUser ? (tgUser.first_name || tgUser.username || tgUser.id) + (tgUser.last_name ? ' ' + tgUser.last_name : '') : '...';
   const avatarUrl = tgUser?.photo_url || 'https://placehold.co/40x40';
-  const saveIndicator = () => {
-    if (saveStatus.status === 'saving') return <span style={{ color: '#ffa500' }}>Сохранение...</span>;
-    if (saveStatus.status === 'error') return <span style={{ color: '#f55' }}>Ошибка сохранения</span>;
-    if (saveStatus.status === 'ok') return <span style={{ color: '#6c6' }}>Сохранено</span>;
-    return null;
-  };
-  const onlineBadge = isOnline ? <span style={{ color: '#6c6' }}>online</span> : <span style={{ color: '#f55' }}>offline</span>;
+  // (saveIndicator / onlineBadge UI перенесены в status-dock снизу)
 
   useEffect(() => {
     // Ensure setter referenced even if events not triggered yet
@@ -1188,7 +1208,7 @@ function App() {
     };
     loop();
     return ()=>{ stop=true; };
-  }, [getApi, userId]);
+  }, [getApi, userId, flashMsg]);
 
   const requestAdventure = useCallback(async ()=>{
     if(!party) { flashMsg('Нет пати'); return; }
@@ -1199,7 +1219,7 @@ function App() {
       const r = await fetch(getApi('/party/adventure/request'), { method:'POST', headers, body: JSON.stringify({}) });
       const js = await r.json(); if(js.success){ flashMsg('Ожидание ответа пати'); } else if(js.error==='not_leader'){ flashMsg('Вы не лидер'); } else flashMsg('Ошибка запроса');
     } catch{ flashMsg('Сбой'); }
-  }, [party, getApi, userId]);
+  }, [party, getApi, userId, flashMsg]);
 
   const respondAdventure = useCallback(async (accept:boolean)=>{
     try {
@@ -1207,7 +1227,7 @@ function App() {
       const r = await fetch(getApi('/party/adventure/respond'), { method:'POST', headers, body: JSON.stringify({ accept }) });
       const js = await r.json(); if(js.success){ if(!accept) flashMsg('Отказано'); setAdventurePrompt(null); if(accept) flashMsg('Принято'); }
     } catch{ flashMsg('Сбой ответа'); }
-  }, [getApi, userId]);
+  }, [getApi, userId, flashMsg]);
 
   const leaveParty = useCallback(async ()=>{
     try {
@@ -1215,7 +1235,7 @@ function App() {
       const r = await fetch(getApi('/party/leave'), { method:'POST', headers, body: JSON.stringify({}) });
       const js = await r.json(); if(js.success){ flashMsg('Пати покинута'); refreshParty(); }
     } catch{ flashMsg('Сбой выхода'); }
-  }, [getApi, refreshParty, userId]);
+  }, [getApi, refreshParty, userId, flashMsg]);
 
 
   return (
@@ -1246,6 +1266,14 @@ function App() {
           <main className={`main main-stage`}>
             <div className="stage-bg-main" />
             <div className="stage-ground-main" />
+            <div className="toasts-container">
+              {toasts.map(t => (
+                <div key={t.id} className={`toast ${t.type||''} ${t.fade? 'fade-out':''}`}>
+                  {t.ttl && <div className="ttl">{t.ttl}</div>}
+                  <div className="body">{t.body}</div>
+                </div>
+              ))}
+            </div>
             {playerSprite}
             {partySprites}
             <EquippedBadge />
@@ -1291,6 +1319,14 @@ function App() {
   <main className={`main main-stage${isFight ? ' fight' : ' travel'}`} ref={stageRef as any}>
             <div className="stage-bg-main" />
             <div className="stage-ground-main" />
+            <div className="toasts-container">
+              {toasts.map(t => (
+                <div key={t.id} className={`toast ${t.type||''} ${t.fade? 'fade-out':''}`}>
+                  {t.ttl && <div className="ttl">{t.ttl}</div>}
+                  <div className="body">{t.body}</div>
+                </div>
+              ))}
+            </div>
             <Adventure
               embedded
               onExit={() => setScreen('main')}
@@ -1302,11 +1338,6 @@ function App() {
         stageRef={stageRef as any}
             />
           </main>
-          <div className="screen">
-            <div style={{ marginTop: 4, fontSize: 11, display: 'flex', gap: 8, alignItems: 'center', justifyContent:'center' }}>
-              {onlineBadge} {saveIndicator()}
-            </div>
-          </div>
           <footer className="footer">
             <button onClick={() => setScreen('main')}>Закончить поход</button>
           </footer>
