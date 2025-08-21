@@ -20,7 +20,9 @@ backend/db/*.sqlite3-shm
 backend/db/*.sqlite3-wal
 
 # Build outputs
-frontend/build/
+# NOTE: We need to commit frontend/build for gh-pages subtree deployment.
+# If you later switch to an automated deploy (gh-pages action), you can re-ignore it.
+#!frontend/build/
 frontend/dist/
 
 # Local tooling/binaries
