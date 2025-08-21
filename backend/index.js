@@ -39,6 +39,15 @@ function authMiddleware(req, res, next) {
     req.tgUser = { id: devUser };
     return next();
   }
+  // Временный режим: разрешить dev fallback с GitHub Pages если явно включено
+  if (process.env.GHPAGES_DEV_FALLBACK === '1') {
+    const origin = req.headers.origin || '';
+    if (/github\.io$/i.test(origin) && req.headers['x-dev-user']) {
+      req.tgUser = { id: String(req.headers['x-dev-user']) };
+      if (process.env.NODE_ENV !== 'production') console.warn('[AUTH] TEMP ghpages fallback x-dev-user=', req.tgUser.id);
+      return next();
+    }
+  }
   const initData = req.headers['x-telegram-init'];
   if (!initData) {
     if (process.env.NODE_ENV !== 'production') console.warn('[AUTH] missing x-telegram-init');

@@ -100,6 +100,10 @@ export const StickmanCombinedEditor: React.FC<StickmanCombinedEditorProps> = ({ 
   // Touch drag (mobile) для перетаскивания предметов как на ПК
   const [touchDrag, setTouchDrag] = useState<{active:boolean; itemId:string|null; x:number; y:number; startX:number; startY:number;}>({active:false,itemId:null,x:0,y:0,startX:0,startY:0});
   const cancelTouchDrag = () => setTouchDrag(d=> ({...d, active:false, itemId:null}));
+  // Long-press detection for inventory item drag (to allow horizontal scroll without immediate drag)
+  const touchHoldRef = useRef<{timer:any; started:boolean; itemId:string|null; startX:number; startY:number; cancelled:boolean}>({timer:null, started:false, itemId:null, startX:0, startY:0, cancelled:false});
+  // Candidate joint detach (tap without move)
+  const jointDetachRef = useRef<{jointIndex:number; moved:boolean}|null>(null);
   // Панорамирование и рисование
   const [pan, setPan] = useState({ x:0, y:0 });
   const panState = useRef<{active:boolean; startX:number; startY:number; baseX:number; baseY:number; moved:boolean}>({active:false,startX:0,startY:0,baseX:0,baseY:0,moved:false});
@@ -345,11 +349,9 @@ export const StickmanCombinedEditor: React.FC<StickmanCombinedEditorProps> = ({ 
             }
           }
         }
-        // Если НЕТ выбранного предмета и на суставе есть attachment — снимаем (desktop: простое нажатие, mobile: тап)
+        // Если есть attachment и нет выбранного предмета — пометим для возможного отсоединения (если не будет движения)
         if (!selectedItem && !drawEnabled && attachments.some(a=> a.jointIndex===i)) {
-          detachAttachment(i);
-          if (navigator.vibrate) try { navigator.vibrate(10); } catch {}
-          return; // не начинаем drag после снятия
+          jointDetachRef.current = { jointIndex: i, moved: false };
         }
         // Долгий тап для отсоединения (только touch)
         if (e.pointerType==='touch') {
@@ -398,6 +400,9 @@ export const StickmanCombinedEditor: React.FC<StickmanCombinedEditorProps> = ({ 
       if (e.buttons === 1 && drawEnabled) paintPixel(mx, my);
       return;
     }
+    if (jointDetachRef.current && jointDetachRef.current.jointIndex === dragIdx) {
+      jointDetachRef.current.moved = true;
+    }
     setFrames(list => list.map((f, idx) => idx === currentFrame ? { joints: f.joints.map((j, i) => i === dragIdx ? { x: mx, y: my } : j) } : f));
   };
   const onPointerUp = (e?: React.PointerEvent<HTMLCanvasElement>) => {
@@ -405,6 +410,11 @@ export const StickmanCombinedEditor: React.FC<StickmanCombinedEditorProps> = ({ 
       try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch {}
     }
     finishPan(e as any, true); setDragIdx(null);
+    if (jointDetachRef.current && !jointDetachRef.current.moved && !selectedItem && !drawEnabled) {
+      detachAttachment(jointDetachRef.current.jointIndex);
+      if (navigator.vibrate) try { navigator.vibrate(12); } catch {}
+    }
+    jointDetachRef.current = null;
   if (longPressRef.current.active) { longPressRef.current.active=false; clearTimeout(longPressRef.current.tid); longPressRef.current.tid=null; }
     if (touchDrag.active) {
       // Завершение дропа
@@ -685,11 +695,35 @@ export const StickmanCombinedEditor: React.FC<StickmanCombinedEditorProps> = ({ 
                        onClick={()=> setSelectedItem(it.id)}
                        onPointerDown={(e)=> {
                           if (e.pointerType==='touch') {
-                            // Запуск кастомного drag (жест)
-                            setSelectedItem(''); // не мешаем логике быстрого прикрепления
-                            setTouchDrag({ active:true, itemId:it.id, x:e.clientX, y:e.clientY, startX:e.clientX, startY:e.clientY });
-                            if (navigator.vibrate) try { navigator.vibrate(8); } catch {}
-                            e.preventDefault();
+                            touchHoldRef.current.cancelled=false;
+                            touchHoldRef.current.started=false;
+                            touchHoldRef.current.itemId=it.id;
+                            touchHoldRef.current.startX=e.clientX;
+                            touchHoldRef.current.startY=e.clientY;
+                            if (touchHoldRef.current.timer) clearTimeout(touchHoldRef.current.timer);
+                            touchHoldRef.current.timer = setTimeout(()=>{
+                              if (!touchHoldRef.current.cancelled && touchHoldRef.current.itemId===it.id) {
+                                touchHoldRef.current.started=true;
+                                setSelectedItem('');
+                                setTouchDrag({ active:true, itemId:it.id, x:e.clientX, y:e.clientY, startX:e.clientX, startY:e.clientY });
+                                if (navigator.vibrate) try { navigator.vibrate(12); } catch {}
+                              }
+                            },260);
+                          }
+                        }}
+                       onPointerMove={(e)=> {
+                          if (e.pointerType==='touch' && !touchHoldRef.current.started && touchHoldRef.current.itemId===it.id) {
+                            const dx=Math.abs(e.clientX-touchHoldRef.current.startX);
+                            const dy=Math.abs(e.clientY-touchHoldRef.current.startY);
+                            if (dx>8||dy>8) { touchHoldRef.current.cancelled=true; if (touchHoldRef.current.timer) { clearTimeout(touchHoldRef.current.timer); touchHoldRef.current.timer=null; } }
+                          }
+                        }}
+                       onPointerUp={(e)=> {
+                          if (e.pointerType==='touch') {
+                            if (touchHoldRef.current.timer) { clearTimeout(touchHoldRef.current.timer); touchHoldRef.current.timer=null; }
+                            if (!touchHoldRef.current.started && !touchHoldRef.current.cancelled) {
+                              setSelectedItem(it.id);
+                            }
                           }
                         }}
                        className={`editor-item inv-mini ${selectedItem===it.id? 'selected':''} ${attachedJoints.length? 'attached':''}`}
