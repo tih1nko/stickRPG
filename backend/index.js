@@ -91,17 +91,35 @@ app.use(cors({
   methods: ['GET','POST','OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-telegram-init', 'x-dev-user', 'bypass-tunnel-reminder']
 }));
+// Дополнительный dev-мидлвар вставляющий ACAO для всех ответов (подстраховка, если preflight прошёл вне cors)
+app.use((req,res,next)=>{
+  const devRelaxed = process.env.DEV_MODE === '1';
+  const origin = req.headers.origin;
+  if (devRelaxed) {
+    if (origin) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Vary','Origin');
+    } else {
+      res.header('Access-Control-Allow-Origin','*');
+    }
+    res.header('Access-Control-Allow-Headers','Content-Type, x-telegram-init, x-dev-user, bypass-tunnel-reminder');
+    res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
+  }
+  next();
+});
 // Explicit OPTIONS fallback for any route (some proxies strip automatic handling)
 app.use((req,res,next)=>{
   if (req.method === 'OPTIONS') {
+    const devRelaxed = process.env.DEV_MODE === '1';
     const origin = req.headers.origin;
-    if (origin) {
-      // Разрешаем тот же origin что прошёл CORS (упрощённо, так как dev whitelist пуст и DEV_MODE=1)
-      res.header('Access-Control-Allow-Origin', origin);
-      res.header('Vary','Origin');
+    if (devRelaxed) {
+      if (origin) { res.header('Access-Control-Allow-Origin', origin); res.header('Vary','Origin'); }
+      else res.header('Access-Control-Allow-Origin','*');
     }
     res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
-    res.header('Access-Control-Allow-Headers','Content-Type, x-telegram-init, x-dev-user, bypass-tunnel-reminder');
+    // Используем запрошенные заголовки если браузер прислал их
+    const reqHeaders = req.headers['access-control-request-headers'];
+    res.header('Access-Control-Allow-Headers', reqHeaders || 'Content-Type, x-telegram-init, x-dev-user, bypass-tunnel-reminder');
     res.header('Access-Control-Max-Age','600');
     return res.sendStatus(204);
   }
