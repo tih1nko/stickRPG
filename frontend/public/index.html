@@ -38,14 +38,23 @@
       // Загрузка runtime config (public/config.json) если нет явного override
       (function(){
         if (window.__API_BASE__) return; // уже задан через ?api= или внешним скриптом
-        fetch('./config.json', {cache:'no-store'}).then(function(r){
-          if(!r.ok) throw new Error('config.json '+r.status);
-          return r.json();
-        }).then(function(cfg){
-          if (cfg && cfg.apiBase && !window.__API_BASE__) {
-            window.__API_BASE__ = (cfg.apiBase+'').replace(/\/$/,'');
-          }
-        }).catch(function(){ /* silent */ });
+        try {
+          var p = window.location.pathname || '/';
+          // Если открыто без завершающего слэша (/stickRPG), относительный './config.json' резолвится в /config.json.
+          // Принудительно формируем базу каталога.
+          if (!p.endsWith('/')) p += '/';
+          var cfgUrl = p.replace(/\/+/g,'/') + 'config.json';
+          // Защита от двойного слэша в начале
+          cfgUrl = cfgUrl.replace(/\/\/+/, '/');
+          fetch(cfgUrl, { cache:'no-store' })
+            .then(function(r){ if(!r.ok) throw new Error('config.json '+r.status); return r.json(); })
+            .then(function(cfg){
+              if (cfg && cfg.apiBase && !window.__API_BASE__) {
+                window.__API_BASE__ = (cfg.apiBase+'').replace(/\/$/,'');
+              }
+            })
+            .catch(function(){ /* silent */ });
+        } catch(e) {}
       })();
     </script>
   </head>
