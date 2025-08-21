@@ -77,14 +77,18 @@ const app = express();
 const rawOrigins = (process.env.CORS_ORIGINS || '').split(',').map(o=>o.trim()).filter(Boolean);
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // non-browser / same-origin
     const devRelaxed = process.env.DEV_MODE === '1';
+    if (devRelaxed) {
+      // В dev разрешаем всё (origin может быть undefined для same-origin fetch)
+      if (!origin) return cb(null, true);
+      return cb(null, true);
+    }
+    if (!origin) return cb(null, true);
     const autoTunnel = /\.loca\.lt$|\.ngrok-free\.app$/i.test(origin);
-    if (
-      rawOrigins.length === 0 && devRelaxed ||
-      rawOrigins.includes(origin) ||
-      (devRelaxed && autoTunnel)
-    ) return cb(null, true);
+    if (rawOrigins.includes(origin) || autoTunnel) {
+      return cb(null, true);
+    }
+    if (process.env.NODE_ENV !== 'production') console.warn('[CORS] blocked', origin);
     return cb(new Error('CORS blocked: ' + origin));
   },
   credentials: false,
