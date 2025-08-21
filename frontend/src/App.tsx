@@ -548,6 +548,7 @@ function App() {
   const [partySentInvites, setPartySentInvites] = useState<any[]>([]);
   const [adventurePrompt, setAdventurePrompt] = useState<any|null>(null); // данные о запросе от другого
   const [acceptedAdventure, setAcceptedAdventure] = useState<{partyId:string; requesterId:string; createdAt:number}|null>(null);
+  const [partyAdventure, setPartyAdventure] = useState<{ status:'pending'|'active'|'ready'|'declined'; mob?:{ name:string; hp:number; max:number; color:string; xp:number } }|null>(null);
   // Toast notifications
   type Toast = { id:string; body:string; type?:'good'|'bad'; ttl?:string; fade?:boolean };
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -1206,13 +1207,19 @@ function App() {
             } else if (!acceptedAdventure || acceptedAdventure.createdAt !== req.created_at) {
               if(screen!== 'adventure') setAdventurePrompt(req); // показываем только если не в походе
             }
-          } else if(req && req.status==='ready') {
+          } else if(req && (req.status==='ready' || req.status==='active')) {
             // Все согласились: авто старт у всех
             setAdventurePrompt(null);
             if(screen!=='adventure') setScreen('adventure');
+            if(req.status==='active') {
+              setPartyAdventure({ status:'active', mob: req.mob_name ? { name:req.mob_name, hp:req.mob_hp, max:req.mob_max, color:req.mob_color, xp:req.mob_xp }: undefined });
+            } else {
+              setPartyAdventure({ status:'ready' });
+            }
           } else if(!req && screen==='adventure') {
             // Если запрос исчез (finish) – выходим на main
             setScreen('main');
+            setPartyAdventure(null);
           } else {
             setAdventurePrompt(null);
           }
@@ -1245,7 +1252,7 @@ function App() {
     const js = await r.json(); if(js.success){ if(!accept) flashMsg('Отказано'); setAdventurePrompt(null); if(accept){ flashMsg(js.ready? 'Начинаем!':'Принято'); // сохраняем чтобы не спамить модал
           // сохраняем отпечаток запроса (берём текущее adventurePrompt либо вытащим через последний статус если нужно)
           if(adventurePrompt){ setAcceptedAdventure({ partyId: adventurePrompt.party_id || (party?.partyId||''), requesterId: adventurePrompt.requester_id, createdAt: adventurePrompt.created_at }); }
-      if(js.ready || adventurePrompt?.requester_id === userId) setScreen('adventure');
+          if(js.ready || adventurePrompt?.requester_id === userId) setScreen('adventure');
         } }
     } catch{ flashMsg('Сбой ответа'); }
   }, [getApi, userId, flashMsg, adventurePrompt, party, setScreen]);
@@ -1340,6 +1347,28 @@ function App() {
   <main className={`main main-stage${isFight ? ' fight' : ' travel'}`} ref={stageRef as any}>
             <div className="stage-bg-main" />
             <div className="stage-ground-main" />
+            {partyAdventure?.status==='active' && partyAdventure.mob && (
+              <div style={{ position:'absolute', top:12, left:'50%', transform:'translateX(-50%)', background:'#17242bcc', padding:'10px 14px', borderRadius:14, display:'flex', flexDirection:'column', alignItems:'center', gap:6, boxShadow:'0 4px 12px -4px #000a', zIndex:40, minWidth:220 }}>
+                <div style={{fontSize:13, fontWeight:600}}>{partyAdventure.mob.name}</div>
+                <div style={{width:180, height:10, background:'#2a363d', borderRadius:6, overflow:'hidden', boxShadow:'0 0 0 1px #1c292f inset'}}>
+                  <div style={{height:'100%', width:`${(partyAdventure.mob.hp/partyAdventure.mob.max)*100}%`, background:'linear-gradient(90deg,#f55,#faa)'}} />
+                </div>
+                <div style={{fontSize:11, opacity:.75}}>{partyAdventure.mob.hp}/{partyAdventure.mob.max} HP</div>
+                <div style={{display:'flex', gap:8}}>
+                  <button className="btn btn-small" onClick={async()=>{
+                    try {
+                      const headers: Record<string,string> = initDataRef.current ? { 'Content-Type':'application/json','x-telegram-init': initDataRef.current } : { 'Content-Type':'application/json','x-dev-user': userId||'dev-user' };
+                      const r = await fetch(getApi('/party/adventure/attack'), { method:'POST', headers, body: JSON.stringify({}) });
+                      const js = await r.json();
+                      if(js.success && partyAdventure?.mob){
+                        setPartyAdventure(p=> p && p.mob ? { ...p, mob: { ...p.mob, hp: js.mob_hp } } : p);
+                        if(js.defeated) flashMsg('Моб побеждён!');
+                      }
+                    } catch{}
+                  }}>Атаковать</button>
+                </div>
+              </div>
+            )}
             <div className="toasts-container">
               {toasts.map(t => (
                 <div key={t.id} className={`toast ${t.type||''} ${t.fade? 'fade-out':''}`}>

@@ -269,7 +269,12 @@ try {
     created_at INTEGER,
   status TEXT,
   decliner_id TEXT,
-  accepted_ids TEXT
+    accepted_ids TEXT,
+    mob_name TEXT,
+    mob_hp INTEGER,
+    mob_max INTEGER,
+    mob_color TEXT,
+    mob_xp INTEGER
   )`).run();
 } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[SCHEMA party_adventure] failed', e.message); }
 // MIGRATE add accepted_ids if missing (for existing installations prior to column addition)
@@ -279,6 +284,12 @@ try {
     db.prepare('ALTER TABLE party_adventure_requests ADD COLUMN accepted_ids TEXT').run();
     if (process.env.NODE_ENV !== 'production') console.log('[MIGRATE] party_adventure_requests +accepted_ids');
   }
+  const addAdvCol = (name,type) => { if(!advCols.includes(name)) { try { db.prepare(`ALTER TABLE party_adventure_requests ADD COLUMN ${name} ${type}`).run(); if (process.env.NODE_ENV !== 'production') console.log('[MIGRATE] party_adventure_requests +'+name); } catch(e){} } };
+  addAdvCol('mob_name','TEXT');
+  addAdvCol('mob_hp','INTEGER');
+  addAdvCol('mob_max','INTEGER');
+  addAdvCol('mob_color','TEXT');
+  addAdvCol('mob_xp','INTEGER');
 } catch(e){ if (process.env.NODE_ENV !== 'production') console.warn('[MIGRATE accepted_ids] failed', e.message); }
 // MIGRATE notif_sent
 try {
@@ -875,8 +886,8 @@ app.post('/party/adventure/request', authMiddleware, (req,res)=>{
   const mem = db.prepare("SELECT role FROM party_members WHERE party_id=? AND user_id=?").get(partyId, req.tgUser.id);
   if(!mem || mem.role !== 'leader') return res.status(403).json({ success:false, error:'not_leader' });
     // Upsert request (replace existing)
-    db.prepare('INSERT INTO party_adventure_requests(party_id, requester_id, created_at, status, decliner_id, accepted_ids) VALUES(?,?,?,?,NULL,?) ON CONFLICT(party_id) DO UPDATE SET requester_id=excluded.requester_id, created_at=excluded.created_at, status=excluded.status, decliner_id=NULL, accepted_ids=excluded.accepted_ids')
-      .run(partyId, req.tgUser.id, Date.now(), 'pending', '');
+    db.prepare('INSERT INTO party_adventure_requests(party_id, requester_id, created_at, status, decliner_id, accepted_ids, mob_name, mob_hp, mob_max, mob_color, mob_xp) VALUES(?,?,?,?,NULL,?,?,?,?,?,?) ON CONFLICT(party_id) DO UPDATE SET requester_id=excluded.requester_id, created_at=excluded.createdAt, status=excluded.status, decliner_id=NULL, accepted_ids=excluded.accepted_ids, mob_name=NULL, mob_hp=NULL, mob_max=NULL, mob_color=NULL, mob_xp=NULL')
+      .run(partyId, req.tgUser.id, Date.now(), 'pending', '', null, null, null, null, null);
     res.json({ success:true });
   } catch(e){ res.status(500).json({ success:false, error:'adventure_request_failed' }); }
 });
@@ -900,8 +911,21 @@ app.post('/party/adventure/respond', authMiddleware, (req,res)=>{
       const others = db.prepare('SELECT user_id FROM party_members WHERE party_id=? AND user_id<>?').all(partyId, reqRow.requester_id).map(r=>String(r.user_id));
       const allAccepted = others.every(id=> accepted.includes(id));
       if(allAccepted){
-        db.prepare("UPDATE party_adventure_requests SET status='ready', accepted_ids=? WHERE party_id=? AND status='pending'").run(accepted.join(','), partyId);
-        return res.json({ success:true, accepted:true, ready:true });
+        // Генерируем моба
+        const mobs = [
+          { name:'Слизень', base:10, color:'#5c9' },
+          { name:'Паук', base:14, color:'#9c5' },
+          { name:'Гоблин', base:18, color:'#c95' },
+          { name:'Скелет', base:22, color:'#ccc' },
+          { name:'Орк', base:28, color:'#8a5' }
+        ];
+        const pick = mobs[Math.floor(Math.random()*mobs.length)];
+        const variance = 0.7 + Math.random()*0.6;
+        const max = Math.round(pick.base * variance);
+        const xp = Math.max(5, Math.round(max * (1.2 + Math.random()*0.6)));
+        db.prepare("UPDATE party_adventure_requests SET status='active', accepted_ids=?, mob_name=?, mob_hp=?, mob_max=?, mob_color=?, mob_xp=? WHERE party_id=? AND status='pending'")
+          .run(accepted.join(','), pick.name, max, max, pick.color, xp, partyId);
+        return res.json({ success:true, accepted:true, ready:true, active:true });
       } else {
         db.prepare('UPDATE party_adventure_requests SET accepted_ids=? WHERE party_id=? AND status=\'pending\'').run(accepted.join(','), partyId);
         return res.json({ success:true, accepted:true, ready:false });
@@ -933,6 +957,25 @@ app.get('/party/adventure/status', authMiddleware, (req,res)=>{
     }
   res.json({ success:true, request: reqRow });
   } catch(e){ res.status(500).json({ success:false, error:'adventure_status_failed' }); }
+});
+
+// Adventure: attack shared mob
+app.post('/party/adventure/attack', authMiddleware, (req,res)=>{
+  try {
+    const row = db.prepare('SELECT party_id FROM users WHERE id=?').get(req.tgUser.id);
+    if(!row || !row.party_id) return res.status(400).json({ success:false, error:'no_party' });
+    const partyId = row.party_id;
+    const reqRow = db.prepare('SELECT * FROM party_adventure_requests WHERE party_id=?').get(partyId);
+    if(!reqRow || reqRow.status!=='active') return res.status(400).json({ success:false, error:'not_active' });
+    if(reqRow.mob_hp <=0) return res.json({ success:true, mob_hp:0, defeated:true });
+    // базовый урон
+    const dmg = 3 + Math.floor(Math.random()*3);
+    const newHp = Math.max(0, reqRow.mob_hp - dmg);
+    db.prepare('UPDATE party_adventure_requests SET mob_hp=? WHERE party_id=?').run(newHp, partyId);
+    let defeated = false;
+    if(newHp === 0){ defeated = true; }
+    res.json({ success:true, mob_hp:newHp, mob_max:reqRow.mob_max, defeated, dmg, mob_xp:reqRow.mob_xp });
+  } catch(e){ res.status(500).json({ success:false, error:'attack_failed' }); }
 });
 
 // Adventure: finish (any member can finish; removes request row so клиенты выйдут из похода)
