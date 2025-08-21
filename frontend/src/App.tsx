@@ -655,8 +655,18 @@ function App() {
   }, []);
 
   const authHeaders = useCallback((): Record<string,string> => {
-    if (initDataRef.current) return { 'Content-Type': 'application/json', 'x-telegram-init': initDataRef.current };
-    return { 'Content-Type': 'application/json', 'x-dev-user': (userId || 'dev-user') };
+    const base: Record<string,string> = initDataRef.current
+      ? { 'Content-Type': 'application/json', 'x-telegram-init': initDataRef.current }
+      : { 'Content-Type': 'application/json', 'x-dev-user': (userId || 'dev-user') };
+    // localtunnel (loca.lt) иногда показывает interstitial с 401 без custom header – добавим обходной заголовок
+    try {
+      const w:any = window as any;
+      const apiBase = (w.__API_BASE__ || process.env.REACT_APP_API_BASE || '').toString();
+      if (apiBase.includes('.loca.lt')) {
+        base['bypass-tunnel-reminder'] = '1';
+      }
+    } catch {}
+    return base;
   }, [userId]);
 
   const getApi = useCallback((path:string) => {
